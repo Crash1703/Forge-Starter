@@ -14,6 +14,7 @@ import { defaultOptions, planRoute, type RouteOptions, type RouteResult, type Ro
 import { elevationProfile, type ElevationProfile } from "./lib/elevation";
 import { reverseGeocode } from "./lib/places";
 import { parseGpx, toGpx } from "./lib/gpx";
+import { saveFile, shareableUrl, shareLink } from "./lib/native";
 import {
   decodeShare,
   encodeShare,
@@ -242,23 +243,16 @@ export default function App() {
     storeSaved(next);
   }
 
-  function download(filename: string, content: string, type: string) {
-    const url = URL.createObjectURL(new Blob([content], { type }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
   function exportGpx() {
     if (!route) return;
     const title = name.trim() || routeTitle();
-    download(
+    saveFile(
       `${title.replace(/[^\w-]+/g, "_").slice(0, 60) || "route"}.gpx`,
       toGpx({ name: title, waypoints: ridePath(stops, options.returnToStart).map((s) => s.position), track: route.path }),
       "application/gpx+xml",
-    );
+    ).catch(() => {
+      /* user closed the share sheet */
+    });
   }
 
   async function importGpx(file: File) {
@@ -280,10 +274,9 @@ export default function App() {
   }
 
   async function share() {
-    const url = location.href;
+    const url = shareableUrl();
     try {
-      if (navigator.share) await navigator.share({ title: name || "Route", url });
-      else {
+      if (!(await shareLink(name || "Route", url))) {
         await navigator.clipboard.writeText(url);
         flash("Link copied");
       }

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Ride Forge</string>
+    <string name="title_activity_main">Ride Forge</string>
+    <string name="package_name">io.github.crash1703.rideforge</string>
+    <string name="custom_url_scheme">io.github.crash1703.rideforge</string>
+</resources>

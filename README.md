@@ -39,6 +39,20 @@ The public servers are run by volunteers and non-profits. That's fine for person
 | `npm run build` | Typecheck and build static files into `dist/` (deploy to any static host) |
 | `npm test` | Unit tests for geometry, curviness scoring, routing and search parsing, GPX, polyline and share links |
 
+## Android app (Ride Forge)
+
+The same app, wrapped for Android with [Capacitor](https://capacitorjs.com) as **Ride Forge**.
+
+**Install:** on your phone, open the [latest release](../../releases/latest) and download `RideForge-1.N.apk`. Open it, and if Android asks, allow your browser to install unknown apps. To update, install the newer APK over the top; your saved routes are kept.
+
+**How it's built:** every push to `main` runs `.github/workflows/android.yml`, which tests and builds the web app, copies it into `android/` (`npx cap sync android`), builds a signed APK with Gradle, and publishes it as a release. The version is `1.<build number>`, so each APK installs as an update over the last.
+
+**Signing:** APKs are signed with `android/app/ride-forge.keystore`, committed to the repo so every build can update the installed app (Android refuses updates signed with a different key). That's fine for sideloading. Before publishing on the Play Store, move the key into a GitHub secret and use a fresh key.
+
+**Local build** (needs the Android SDK and JDK 21): `npm run android`, then open `android/` in Android Studio or run `./gradlew assembleRelease` there.
+
+In the app, **Share** sends a link to the public website, and **GPX** opens Android's share sheet (Save to Files, OsmAnd, …) because apps can't download files the way a browser does.
+
 ## How "Twisty" works
 
 No router offers a "curvy roads" button, so the app searches for one:
