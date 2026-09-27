@@ -1,0 +1,60 @@
+name: Build Android app
+
+on:
+  push:
+    branches: [main]
+  pull_request: # build only, to catch problems before merging
+  workflow_dispatch:
+
+permissions:
+  contents: write # publish the APK as a GitHub release
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: 1.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+        env:
+          VITE_BUILD_ID: ${{ github.sha }}
+      - run: npx cap sync android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleRelease -PversionCode=${{ github.run_number }} -PversionName=$VERSION
+      - run: cp android/app/build/outputs/apk/release/app-release.apk RideForge-$VERSION.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RideForge-${{ env.VERSION }}
+          path: RideForge-${{ env.VERSION }}.apk
+      - uses: softprops/action-gh-release@v2
+        if: github.event_name != 'pull_request'
+        with:
+          tag_name: android-${{ env.VERSION }}
+          name: Ride Forge ${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: RideForge-${{ env.VERSION }}.apk
+          body: |
+            Android app built from ${{ github.sha }}.
+
+            **Install or update on your phone**
+            1. Tap **RideForge-${{ env.VERSION }}.apk** below to download it.
+            2. Open the download. If Android asks, allow your browser to install unknown apps.
+            3. Tap **Install** (or **Update**). Your saved routes are kept.
