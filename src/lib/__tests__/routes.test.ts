@@ -214,3 +214,63 @@ describe("snapping and U-turn trade-offs", () => {
     expect(r.distance).toBe(24000);
   });
 });
+
+describe("loops come home a different way", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const home = { lat: -26.8, lng: 153.1 };
+  const town = destination(home, 270, 30000);
+  const northArc = [town, destination(destination(home, 270, 15000), 0, 8000), home];
+  const leg = (pts: { lat: number; lng: number }[], km: number) => ({
+    shape: encode6(pts.map((p) => [p.lat, p.lng])),
+    summary: { length: km, time: km * 60 },
+    maneuvers: [],
+  });
+
+  function stubRouter(legRequest: "ok" | "fail") {
+    const bodies: { locations: { type: string }[]; exclude_locations?: { lat: number; lon: number }[] }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        bodies.push(body);
+        if (body.locations.length === 3) {
+          // Whole loop: the router rides out and straight back the same road.
+          const legs = [leg([home, town], 30), leg([town, home], 30)];
+          return new Response(JSON.stringify({ trip: { summary: { length: 60, time: 3600 }, legs } }), { status: 200 });
+        }
+        if (legRequest === "fail") {
+          return new Response(JSON.stringify({ error: "No path could be found for input" }), { status: 400 });
+        }
+        return new Response(JSON.stringify({ trip: { summary: { length: 36, time: 2400 }, legs: [leg(northArc, 36)] } }), {
+          status: 200,
+        });
+      }),
+    );
+    return bodies;
+  }
+
+  const loopPoints = [{ pos: home }, { pos: town, noUturn: true }, { pos: home }];
+
+  it("re-plans the way home to stay off the roads ridden on the way out", async () => {
+    const bodies = stubRouter("ok");
+    const [r] = await planRoute(loopPoints, { ...defaultOptions, returnToStart: true });
+    const legBody = bodies.find((b) => b.exclude_locations)!;
+    expect(legBody.locations.map((l) => l.type)).toEqual(["break", "break"]);
+    expect(legBody.exclude_locations!.length).toBeLessThanOrEqual(50);
+    expect(r.distance).toBe(66000);
+    expect(r.legs).toEqual([{ distance: 30000, duration: 1800 }, { distance: 36000, duration: 2160 }]);
+  });
+
+  it("keeps the original way home when there's no other road", async () => {
+    stubRouter("fail");
+    const [r] = await planRoute(loopPoints, { ...defaultOptions, returnToStart: true });
+    expect(r.distance).toBe(60000);
+  });
+
+  it("leaves one-way routes alone", async () => {
+    const bodies = stubRouter("ok");
+    await planRoute(loopPoints, { ...defaultOptions, returnToStart: false });
+    expect(bodies.some((b) => b.exclude_locations)).toBe(false);
+  });
+});

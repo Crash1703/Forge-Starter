@@ -9,6 +9,8 @@ import {
   formatDuration,
   midpointOffset,
   outAndBack,
+  sharedRoad,
+  avoidPoints,
   pathLength,
   resample,
   roundTripWaypoints,
@@ -165,5 +167,28 @@ describe("outAndBack", () => {
       heading = (heading + 180) % 360;
     }
     expect(outAndBack(pts, pts[10])).toBe(0);
+  });
+});
+
+describe("sharedRoad and avoidPoints", () => {
+  const home = origin;
+  const town = destination(home, 90, 30000);
+  const straight = [home, town];
+  const northArc = [town, destination(destination(home, 90, 15000), 0, 8000), home];
+
+  it("measures road a return leg shares with the way out, away from the ends", () => {
+    const back = [town, home];
+    // 30 km of shared road minus 1.5 km kept clear at each end.
+    expect(sharedRoad(back, [straight], [town, home])).toBeGreaterThan(26000);
+    expect(sharedRoad(northArc, [straight], [town, home])).toBeLessThan(500);
+  });
+
+  it("spreads at most 50 avoid points along earlier roads, clear of the ends", () => {
+    const pts = avoidPoints([straight], [town, home]);
+    expect(pts.length).toBe(50);
+    expect(pts.every((p) => distance(p, home) >= 1500 && distance(p, town) >= 1500)).toBe(true);
+    // Evenly spread: first and last points near each end of the allowed stretch.
+    expect(distance(pts[0], home)).toBeLessThan(2500);
+    expect(distance(pts[49], town)).toBeLessThan(2500);
   });
 });
