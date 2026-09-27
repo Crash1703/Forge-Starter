@@ -169,3 +169,48 @@ describe("twisty helper points", () => {
     expect(r.warnings).toEqual([spurWarning(1)]);
   });
 });
+
+describe("snapping and U-turn trade-offs", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const start = { lat: 47.0, lng: 11.0 };
+  const pin = destination(start, 90, 8000);
+  const end = destination(start, 90, 20000);
+  const tripAlong = (pts: { lat: number; lng: number }[], km: number) => ({
+    summary: { length: km, time: km * 60 },
+    legs: [{ shape: encode6(pts.map((p) => [p.lat, p.lng])), summary: { length: km, time: km * 60 } }],
+  });
+
+  it("sends each point's search radius to the router", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ trip: tripAlong([start, end], 20) }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await planRoute([{ pos: start }, { pos: pin, radius: 75 }, { pos: end }], { ...defaultOptions, style: "twisty" });
+    const bodies = fetchMock.mock.calls.map((c) => JSON.parse((c as unknown as [string, RequestInit])[1].body as string));
+    expect(bodies[0].locations.map((l: { radius?: number }) => l.radius)).toEqual([undefined, 75, undefined]);
+    const helper = bodies.find((b) => b.locations.some((l: { type: string }) => l.type === "through"));
+    expect(helper.locations.find((l: { type: string }) => l.type === "through").radius).toBe(1500);
+  });
+
+  it("allows a U-turn at a pin when banning it makes the route ride on and back", async () => {
+    // No U-turn at the pin: the route rides 1 km past it and comes back.
+    const beyond = destination(pin, 90, 1000);
+    const lollipop = tripAlong([start, pin, beyond, pin, destination(pin, 180, 3000), end], 26);
+    // U-turn allowed: it turns at the pin, riding only a few metres twice.
+    const clean = tripAlong([start, pin, destination(pin, 180, 3000), end], 24);
+    const types: string[][] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const t = JSON.parse(init.body as string).locations.map((l: { type: string }) => l.type);
+        types.push(t);
+        return new Response(JSON.stringify({ trip: t[1] === "break_through" ? lollipop : clean }), { status: 200 });
+      }),
+    );
+    const [r] = await planRoute([{ pos: start }, { pos: pin, noUturn: true }, { pos: start }], {
+      ...defaultOptions,
+      returnToStart: true,
+    });
+    expect(types.slice(0, 2)).toEqual([["break", "break_through", "break"], ["break", "break", "break"]]);
+    expect(r.distance).toBe(24000);
+  });
+});

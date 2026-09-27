@@ -141,27 +141,47 @@ export function roundTripWaypoints(
 }
 
 /**
- * How many metres of road the route rides twice, out and back, around the
- * point of `path` nearest to `near`: the signature of a detour up a dead end
- * (or to a turning circle) and back down the same road.
+ * How many metres of road the route rides twice, out and back, within
+ * `window` metres (along the route) of the point of `path` nearest to `near`:
+ * the signature of a detour up a dead end, or of riding on past a stop to
+ * find somewhere to turn and coming back.
  *
- * A stretch counts as ridden twice when a point before the nearest one lies
- * within `tolerance` metres of a point after it. Both passes follow the same
- * road centreline, so they coincide; the parallel legs of a hairpin are
- * further apart than that, so switchbacks aren't mistaken for spurs.
+ * Two samples count as the same stretch of road when they are at least
+ * 100 m apart along the route but within `tolerance` metres of each other.
+ * Both passes follow the same road (or its two carriageways), so they nearly
+ * coincide; the parallel legs of a hairpin are further apart than that, so
+ * switchbacks aren't mistaken for spurs. Only a local excursion counts:
+ * leaving home and returning on the same road at the end of a long loop is
+ * outside the window.
  */
-export function outAndBack(path: LatLng[], near: LatLng, window = 3000, tolerance = 12): number {
+export function outAndBack(path: LatLng[], near: LatLng, window = 5000, tolerance = 20): number {
   const step = 20;
+  const minGap = 5; // samples, i.e. 100 m along the route
   const pts = resample(path, step);
-  if (pts.length < 3) return 0;
+  if (pts.length < minGap + 1) return 0;
   let mid = 0;
   for (let i = 1; i < pts.length; i++) if (distance(pts[i], near) < distance(pts[mid], near)) mid = i;
   const span = Math.round(window / step);
-  const before = pts.slice(Math.max(0, mid - span), mid);
-  const after = pts.slice(mid + 1, mid + 1 + span);
-  let twice = 0;
-  for (const p of before) if (after.some((q) => distance(p, q) < tolerance)) twice += step;
-  return twice;
+  const from = Math.max(0, mid - span);
+  const to = Math.min(pts.length - 1, mid + span);
+  // Flat-earth metres are plenty accurate over a few km and much cheaper than
+  // great-circle distance in this O(n²) scan.
+  const kx = 111320 * Math.cos(rad(pts[mid].lat));
+  const ky = 110540;
+  const tol2 = tolerance * tolerance;
+  const twice = new Set<number>();
+  for (let i = from; i <= to; i++) {
+    for (let j = i + minGap; j <= to; j++) {
+      const dx = (pts[j].lng - pts[i].lng) * kx;
+      const dy = (pts[j].lat - pts[i].lat) * ky;
+      if (dx * dx + dy * dy < tol2) {
+        twice.add(i);
+        twice.add(j);
+      }
+    }
+  }
+  // Each stretch ridden twice is counted once on the way out and once back.
+  return (twice.size * step) / 2;
 }
 
 export function midpointOffset(a: LatLng, b: LatLng, fraction: number): LatLng {

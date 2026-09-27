@@ -31,6 +31,9 @@ const STYLES: { id: RouteStyle; name: string; hint: string }[] = [
   { id: "twisty", name: "Twisty", hint: "Hunts for the curviest roads" },
 ];
 
+/** Short commit ID of this build, shown in the footer so riders can tell whether a refresh picked up an update. */
+const BUILD = (import.meta.env.VITE_BUILD_ID as string | undefined)?.slice(0, 7) || "dev";
+
 /** The stops in riding order, including the ride back to the start on a loop. */
 function ridePath(stops: Stop[], returnToStart: boolean): Stop[] {
   return returnToStart && stops.length > 1 ? [...stops, stops[0]] : stops;
@@ -80,10 +83,16 @@ export default function App() {
       const ride = ridePath(stops, options.returnToStart);
       // No turning back at stops on a loop (or at generated loop points), so
       // the route can't ride up a dead end and straight back down it.
-      const points = ride.map((s, i) => ({
-        pos: s.position,
-        noUturn: i > 0 && i < ride.length - 1 && (options.returnToStart || s.auto),
-      }));
+      const points = ride.map((s, i) => {
+        const between = i > 0 && i < ride.length - 1;
+        return {
+          pos: s.position,
+          noUturn: between && (options.returnToStart || s.auto),
+          // Generated loop points are arbitrary, so any road within 1 km will do;
+          // the rider's own pins may snap to a road within 75 m.
+          radius: between ? (s.auto ? 1000 : 75) : undefined,
+        };
+      });
       planRoute(points, options, ctrl.signal)
         .then((r) => {
           setRoutes(r);
@@ -593,7 +602,7 @@ export default function App() {
           contributors · tiles <a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> · routing{" "}
           <a href="https://valhalla.github.io/valhalla/" target="_blank" rel="noreferrer">Valhalla</a> (FOSSGIS) · search{" "}
           <a href="https://photon.komoot.io" target="_blank" rel="noreferrer">Photon</a> · elevation{" "}
-          <a href="https://open-meteo.com" target="_blank" rel="noreferrer">Open-Meteo</a>
+          <a href="https://open-meteo.com" target="_blank" rel="noreferrer">Open-Meteo</a> · version {BUILD}
         </footer>
       </aside>
 
