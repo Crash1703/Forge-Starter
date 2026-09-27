@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { costing, defaultOptions, planRoute, toResult, type ValhallaTrip } from "../routes";
+import { costing, defaultOptions, planRoute, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
 
 /** Encode points as a precision-6 polyline, the format Valhalla returns. */
 function encode6(pts: [number, number][]): string {
@@ -89,5 +89,39 @@ describe("planRoute", () => {
     const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     expect(body.locations.map((l: { type: string }) => l.type)).toEqual(["break", "break_through", "break", "break"]);
     expect(body.locations[3]).toMatchObject({ lat: home.lat, lon: home.lng });
+  });
+});
+
+describe("planRoute on a dead end", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("allows turning around when a stop can't be reached otherwise, and warns", async () => {
+    const trip = { summary: { length: 1, time: 60 }, legs: [{ shape: "", summary: { length: 1, time: 60 } }] };
+    const types: string[][] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        const t = body.locations.map((l: { type: string }) => l.type);
+        types.push(t);
+        return t.includes("break_through")
+          ? new Response(JSON.stringify({ error_code: 442, error: "No path could be found for input" }), { status: 400 })
+          : new Response(JSON.stringify({ trip }), { status: 200 });
+      }),
+    );
+    const home = { lat: 47.26, lng: 11.4 };
+    const [r] = await planRoute([{ pos: home }, { pos: { lat: 47.3, lng: 11.2 }, noUturn: true }, { pos: home }], {
+      ...defaultOptions,
+      returnToStart: true,
+    });
+    expect(types).toEqual([["break", "break_through", "break"], ["break", "break", "break"]]);
+    expect(r.warnings).toEqual([UTURN_WARNING]);
+  });
+
+  it("doesn't retry when the server is busy", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 429 })));
+    await expect(
+      planRoute([{ pos: { lat: 1, lng: 1 } }, { pos: { lat: 2, lng: 2 }, noUturn: true }, { pos: { lat: 1, lng: 1 } }], defaultOptions),
+    ).rejects.toThrow(/busy/);
   });
 });

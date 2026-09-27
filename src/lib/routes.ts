@@ -64,7 +64,15 @@ interface ValhallaResponse {
 // Valhalla allows more, but the public server caps requests; stay well under.
 const MAX_STOPS = 25;
 
-export class RoutingError extends Error {}
+export class RoutingError extends Error {
+  /** The router ran but found no way through these stops (as opposed to being busy or unreachable). */
+  constructor(message: string, readonly noPath = false) {
+    super(message);
+  }
+}
+
+export const UTURN_WARNING =
+  "One of your stops can only be reached by turning around, so the route turns back there. Move that pin onto a through road to avoid it.";
 
 /** A stop to route through. */
 export interface RoutePoint {
@@ -127,7 +135,7 @@ async function computeRoutes(
   const json: ValhallaResponse = await res.json().catch(() => ({}));
   if (!res.ok || !json.trip) {
     if (res.status === 429) throw new RoutingError("The free routing server is busy. Wait a moment and try again.");
-    throw new RoutingError(json.error ? `No route: ${json.error}` : `Routing failed (HTTP ${res.status})`);
+    throw new RoutingError(json.error ? `No route: ${json.error}` : `Routing failed (HTTP ${res.status})`, res.status === 400);
   }
   return [json.trip, ...(json.alternates ?? []).map((a) => a.trip)];
 }
@@ -163,9 +171,24 @@ export function toResult(trip: ValhallaTrip, label: string, detours: LatLng[]): 
 export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal?: AbortSignal): Promise<RouteResult[]> {
   const stops = points.map((p) => p.pos);
   if (stops.length > MAX_STOPS) throw new RoutingError(`A route can have at most ${MAX_STOPS} stops.`);
-  const base: Waypoint[] = points.map((p) => ({ ...p, via: false }));
-  const baseRoutes = await computeRoutes(base, opts, true, signal);
-  const results = baseRoutes.map((r, i) => toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, []));
+  let base: Waypoint[] = points.map((p) => ({ ...p, via: false }));
+  let baseRoutes: ValhallaTrip[];
+  let turnsAround = false;
+  try {
+    baseRoutes = await computeRoutes(base, opts, true, signal);
+  } catch (e) {
+    // A pin at the end of a dead end can only be reached by turning around.
+    // Allow it rather than failing, and tell the rider.
+    if (!(e instanceof RoutingError && e.noPath && base.some((p) => p.noUturn))) throw e;
+    base = base.map((p) => ({ ...p, noUturn: false }));
+    baseRoutes = await computeRoutes(base, opts, true, signal);
+    turnsAround = true;
+  }
+  const warnings = turnsAround ? [UTURN_WARNING] : [];
+  const results = baseRoutes.map((r, i) => ({
+    ...toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, []),
+    warnings,
+  }));
 
   if (opts.style === "twisty" && stops.length < MAX_STOPS) {
     // Longest straight-line leg is where a detour has the most room to find better roads.
@@ -183,7 +206,7 @@ export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal
         const pts = [...base.slice(0, leg + 1), { pos: detour, via: true }, ...base.slice(leg + 1)];
         try {
           const [r] = await computeRoutes(pts, opts, false, signal);
-          results.push(toResult(r, "Detour", [detour]));
+          results.push({ ...toResult(r, "Detour", [detour]), warnings });
         } catch (e) {
           if ((e as Error).name === "AbortError") throw e;
           // A detour point in a lake or on a mountain top just has no route; skip it.
