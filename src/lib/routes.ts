@@ -1,4 +1,4 @@
-import { curviness, distance, midpointOffset, outAndBack, type LatLng } from "./geo";
+import { avoidPoints, curviness, distance, midpointOffset, outAndBack, sharedRoad, type LatLng } from "./geo";
 import { decodePolyline } from "./polyline";
 import { VALHALLA_URL } from "./config";
 
@@ -128,6 +128,7 @@ async function computeRoutes(
   opts: RouteOptions,
   alternatives: boolean,
   signal?: AbortSignal,
+  avoid: LatLng[] = [],
 ): Promise<ValhallaTrip[]> {
   const body = {
     locations: points.map((p) => ({
@@ -139,6 +140,8 @@ async function computeRoutes(
     ...costing(opts),
     ...(alternatives && points.length === 2 ? { alternates: 2 } : {}),
     directions_options: { units: "kilometers", language: navigator.language || "en-US" },
+    // Roads to stay off; Valhalla drops the road nearest each point.
+    ...(avoid.length ? { exclude_locations: avoid.map((p) => ({ lat: p.lat, lon: p.lng })) } : {}),
   };
   let res: Response;
   try {
@@ -179,6 +182,55 @@ export function toResult(trip: ValhallaTrip, label: string, detours: LatLng[]): 
   };
 }
 
+/** A leg sharing more road than this with earlier legs gets re-planned on a loop. */
+const LOOP_SHARED_METRES = 1000;
+
+/**
+ * On a loop, the router happily rides back the way it came: nothing asks it
+ * for a different road home. Re-plan any leg that runs along road an earlier
+ * leg already used, telling the router to stay off that road (except near
+ * the leg's own ends, where sharing the roads around a stop or home is
+ * fine). Keeps the original leg if there's no other way.
+ */
+async function untangleLoop(
+  trip: ValhallaTrip,
+  waypoints: Waypoint[],
+  opts: RouteOptions,
+  signal?: AbortSignal,
+): Promise<ValhallaTrip> {
+  // Legs split at every non-via waypoint.
+  const breaks = waypoints.flatMap((w, i) => (w.via ? [] : [i]));
+  if (trip.legs.length !== breaks.length - 1) return trip;
+  const legs = trip.legs.slice();
+  const paths = legs.map((l) => decodePolyline(l.shape, 6));
+  let changed = false;
+  for (let k = 1; k < legs.length; k++) {
+    const ends = [waypoints[breaks[k]].pos, waypoints[breaks[k + 1]].pos];
+    const earlier = paths.slice(0, k);
+    const shared = sharedRoad(paths[k], earlier, ends);
+    if (shared < LOOP_SHARED_METRES) continue;
+    // Just this leg, with its helper points; a leg's own ends are plain stops.
+    const pts = waypoints
+      .slice(breaks[k], breaks[k + 1] + 1)
+      .map((w, i, all) => (i === 0 || i === all.length - 1 ? { ...w, noUturn: false } : w));
+    try {
+      const [alt] = await computeRoutes(pts, opts, false, signal, avoidPoints(earlier, ends));
+      const altPath = decodePolyline(alt.legs[0].shape, 6);
+      if (alt.legs.length === 1 && sharedRoad(altPath, earlier, ends) < shared) {
+        legs[k] = alt.legs[0];
+        paths[k] = altPath;
+        changed = true;
+      }
+    } catch (e) {
+      if ((e as Error).name === "AbortError") throw e;
+      // No other way round (say, a town with one road in): keep the original leg.
+    }
+  }
+  if (!changed) return trip;
+  const sum = (f: (l: ValhallaTrip["legs"][number]) => number) => legs.reduce((a, l) => a + f(l), 0);
+  return { summary: { length: sum((l) => l.summary.length), time: sum((l) => l.summary.time) }, legs };
+}
+
 /**
  * Plan a route through `points`, in order.
  *
@@ -205,6 +257,10 @@ export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal
     baseRoutes = await computeRoutes(base, opts, true, signal);
     turnsAround = true;
   }
+  const loop = opts.returnToStart
+    ? (trip: ValhallaTrip, pts: Waypoint[]) => untangleLoop(trip, pts, opts, signal)
+    : async (trip: ValhallaTrip) => trip;
+  baseRoutes = [await loop(baseRoutes[0], base), ...baseRoutes.slice(1)];
 
   // Banning U-turns can backfire: a pin on a side street makes the route
   // ride on past it to find somewhere to turn, then come back. Where that
@@ -219,6 +275,7 @@ export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal
     const relaxed = base.map((p, i) => (i > 0 && twice[i - 1] > SPUR_METRES ? { ...p, noUturn: false } : p));
     try {
       const other = await computeRoutes(relaxed, opts, true, signal);
+      other[0] = await loop(other[0], relaxed);
       const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
       if (sum(ridesTwice(other[0])) < sum(twice)) {
         base = relaxed;
@@ -256,7 +313,7 @@ export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal
         const pts = [...base.slice(0, leg + 1), { pos: detour, via: true, radius: HELPER_RADIUS }, ...base.slice(leg + 1)];
         try {
           const [r] = await computeRoutes(pts, opts, false, signal);
-          const candidate = toResult(r, "Detour", [detour]);
+          const candidate = toResult(await loop(r, pts), "Detour", [detour]);
           // The helper point only exists to pull the route sideways. If
           // reaching it means riding up a dead end and back, drop this option.
           if (outAndBack(candidate.path, detour) > SPUR_METRES) continue;

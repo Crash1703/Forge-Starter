@@ -184,6 +184,66 @@ export function outAndBack(path: LatLng[], near: LatLng, window = 5000, toleranc
   return (twice.size * step) / 2;
 }
 
+/** Coarse spatial index: resampled points bucketed into `cell`-metre squares. */
+function pointGrid(paths: LatLng[][], step: number, cell: number) {
+  const ref = paths.find((p) => p.length)?.[0] ?? { lat: 0, lng: 0 };
+  const kx = 111320 * Math.cos(rad(ref.lat));
+  const ky = 110540;
+  const key = (p: LatLng) => `${Math.floor((p.lng * kx) / cell)},${Math.floor((p.lat * ky) / cell)}`;
+  const cells = new Map<string, LatLng[]>();
+  for (const path of paths) {
+    for (const p of resample(path, step)) {
+      const k = key(p);
+      const list = cells.get(k);
+      if (list) list.push(p);
+      else cells.set(k, [p]);
+    }
+  }
+  const near = (p: LatLng, metres: number) => {
+    const cx = Math.floor((p.lng * kx) / cell);
+    const cy = Math.floor((p.lat * ky) / cell);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (const q of cells.get(`${cx + dx},${cy + dy}`) ?? []) {
+          const ex = (q.lng - p.lng) * kx;
+          const ey = (q.lat - p.lat) * ky;
+          if (ex * ex + ey * ey < metres * metres) return true;
+        }
+      }
+    }
+    return false;
+  };
+  return { near };
+}
+
+/**
+ * Metres of `path` that run along road already in `others` (within 20 m),
+ * ignoring anything within `keepOut` metres of the `ends`, where sharing
+ * the roads around a stop or home is unavoidable and fine.
+ */
+export function sharedRoad(path: LatLng[], others: LatLng[][], ends: LatLng[], keepOut = 1500): number {
+  const step = 20;
+  const grid = pointGrid(others, step, 25);
+  let shared = 0;
+  for (const p of resample(path, step)) {
+    if (ends.some((e) => distance(p, e) < keepOut)) continue;
+    if (grid.near(p, 20)) shared += step;
+  }
+  return shared;
+}
+
+/**
+ * Up to `max` points spread evenly along `paths`, skipping anything within
+ * `keepOut` metres of the `ends`: roads for the router to stay off.
+ */
+export function avoidPoints(paths: LatLng[][], ends: LatLng[], max = 50, keepOut = 1500): LatLng[] {
+  const candidates = paths
+    .flatMap((p) => resample(p, 200))
+    .filter((p) => ends.every((e) => distance(p, e) >= keepOut));
+  if (candidates.length <= max) return candidates;
+  return Array.from({ length: max }, (_, i) => candidates[Math.floor(((i + 0.5) * candidates.length) / max)]);
+}
+
 export function midpointOffset(a: LatLng, b: LatLng, fraction: number): LatLng {
   const d = distance(a, b);
   const brg = bearing(a, b);
