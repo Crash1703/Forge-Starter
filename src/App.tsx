@@ -77,7 +77,13 @@ export default function App() {
     const ctrl = new AbortController();
     const t = window.setTimeout(() => {
       setBusy(true);
-      const points = ridePath(stops, options.returnToStart).map((s) => ({ pos: s.position, noUturn: s.auto }));
+      const ride = ridePath(stops, options.returnToStart);
+      // No turning back at stops on a loop (or at generated loop points), so
+      // the route can't ride up a dead end and straight back down it.
+      const points = ride.map((s, i) => ({
+        pos: s.position,
+        noUturn: i > 0 && i < ride.length - 1 && (options.returnToStart || s.auto),
+      }));
       planRoute(points, options, ctrl.signal)
         .then((r) => {
           setRoutes(r);
@@ -346,6 +352,21 @@ export default function App() {
                 </ol>
               )}
 
+              {stops.length > 1 && (
+                <label className="check loop-toggle">
+                  <input
+                    id="return-to-start"
+                    type="checkbox"
+                    checked={options.returnToStart}
+                    onChange={(e) => setOpt("returnToStart", e.target.checked)}
+                  />
+                  <span>
+                    Loop back to the start (A)
+                    <small>No turning around at stops, so the ride won't go up dead ends.</small>
+                  </span>
+                </label>
+              )}
+
               <div className="button-row">
                 <button onClick={locateMe}>◎ My location</button>
                 {stops.length > 1 && (
@@ -418,14 +439,6 @@ export default function App() {
 
             <section>
               <h2>Round trip</h2>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={options.returnToStart}
-                  onChange={(e) => setOpt("returnToStart", e.target.checked)}
-                />
-                Finish back at the start (A)
-              </label>
               <div className="loop">
                 <input
                   type="range"
