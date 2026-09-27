@@ -10,6 +10,8 @@ import { MAP_STYLE } from "../lib/config";
 
 interface Props {
   stops: Stop[];
+  /** The route returns to the first stop, so the last stop isn't the finish. */
+  loop: boolean;
   routes: RouteResult[];
   selected: number;
   hover: LatLng | null;
@@ -137,7 +139,7 @@ export default function MapView(props: Props) {
     if (!m) return;
     const seen = new Set<string>();
     props.stops.forEach((s, i) => {
-      const kind = i === 0 ? "start" : i === props.stops.length - 1 ? "end" : "via";
+      const kind = i === 0 ? "start" : i === props.stops.length - 1 && !props.loop ? "end" : "via";
       seen.add(s.id);
       let entry = markers.current.get(s.id);
       if (!entry) {
@@ -153,7 +155,7 @@ export default function MapView(props: Props) {
       entry.marker.setLngLat([s.position.lng, s.position.lat]);
       entry.el.className = `pin pin-${kind}`;
       entry.el.textContent = kind === "start" ? "A" : kind === "end" ? "B" : String(i);
-      entry.el.title = s.label;
+      entry.el.title = kind === "start" && props.loop ? `${s.label} (start and finish)` : s.label;
     });
     for (const [id, entry] of markers.current) {
       if (!seen.has(id)) {
@@ -161,7 +163,7 @@ export default function MapView(props: Props) {
         markers.current.delete(id);
       }
     }
-  }, [props.stops]);
+  }, [props.stops, props.loop]);
 
   // Route lines: alternatives underneath, selected route on top with a casing.
   useEffect(() => {

@@ -11,6 +11,8 @@ export interface RouteOptions {
   avoidHighways: boolean;
   avoidTolls: boolean;
   avoidFerries: boolean;
+  /** Ride back to the first stop after the last one. */
+  returnToStart: boolean;
 }
 
 export const defaultOptions: RouteOptions = {
@@ -19,6 +21,7 @@ export const defaultOptions: RouteOptions = {
   avoidHighways: false,
   avoidTolls: false,
   avoidFerries: false,
+  returnToStart: false,
 };
 
 export interface Step {
@@ -63,11 +66,23 @@ const MAX_STOPS = 25;
 
 export class RoutingError extends Error {}
 
-interface Waypoint {
+/** A stop to route through. */
+export interface RoutePoint {
   pos: LatLng;
+  /**
+   * Forbid turning around here. Used for generated loop points, which can land
+   * near a dead end the router would otherwise ride up and back down.
+   */
+  noUturn?: boolean;
+}
+
+interface Waypoint extends RoutePoint {
   /** Pass through without splitting the route into another leg. */
   via: boolean;
 }
+
+/** Valhalla location type: legs split at "break*" types, U-turns allowed only at "break" and "via". */
+const locationType = (p: Waypoint) => (p.via ? "through" : p.noUturn ? "break_through" : "break");
 
 /**
  * Valhalla costing for our options. `use_*` values run 0..1, where 0 means
@@ -92,7 +107,7 @@ async function computeRoutes(
   signal?: AbortSignal,
 ): Promise<ValhallaTrip[]> {
   const body = {
-    locations: points.map((p) => ({ lat: p.pos.lat, lon: p.pos.lng, type: p.via ? "through" : "break" })),
+    locations: points.map((p) => ({ lat: p.pos.lat, lon: p.pos.lng, type: locationType(p) })),
     ...costing(opts),
     ...(alternatives && points.length === 2 ? { alternates: 2 } : {}),
     directions_options: { units: "kilometers", language: navigator.language || "en-US" },
@@ -137,7 +152,7 @@ export function toResult(trip: ValhallaTrip, label: string, detours: LatLng[]): 
 }
 
 /**
- * Plan a route through `stops`.
+ * Plan a route through `points`, in order.
  *
  * For the twisty style we ask for several candidate routes (the router's
  * alternatives plus variants pushed off to either side of the longest leg by
@@ -145,9 +160,10 @@ export function toResult(trip: ValhallaTrip, label: string, detours: LatLng[]): 
  * and rank the curviest first. Candidates that take far longer than the
  * quickest one are dropped.
  */
-export async function planRoute(stops: LatLng[], opts: RouteOptions, signal?: AbortSignal): Promise<RouteResult[]> {
+export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal?: AbortSignal): Promise<RouteResult[]> {
+  const stops = points.map((p) => p.pos);
   if (stops.length > MAX_STOPS) throw new RoutingError(`A route can have at most ${MAX_STOPS} stops.`);
-  const base: Waypoint[] = stops.map((pos) => ({ pos, via: false }));
+  const base: Waypoint[] = points.map((p) => ({ ...p, via: false }));
   const baseRoutes = await computeRoutes(base, opts, true, signal);
   const results = baseRoutes.map((r, i) => toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, []));
 

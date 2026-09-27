@@ -1,10 +1,12 @@
-import type { LatLng } from "./geo";
+import { distance, type LatLng } from "./geo";
 import { defaultOptions, type RouteOptions } from "./routes";
 
 export interface Stop {
   id: string;
   label: string;
   position: LatLng;
+  /** Placed by the loop generator rather than chosen by the rider. */
+  auto?: boolean;
 }
 
 export interface SavedRoute {
@@ -42,7 +44,7 @@ export function storeSaved(routes: SavedRoute[]): boolean {
 
 /** Compact, shareable URL hash: #r=<style>.<vehicle>.<flags>~lat,lng,label~... */
 export function encodeShare(stops: Stop[], o: RouteOptions): string {
-  const flags = [o.avoidHighways, o.avoidTolls, o.avoidFerries].map((b) => (b ? 1 : 0)).join("");
+  const flags = [o.avoidHighways, o.avoidTolls, o.avoidFerries, o.returnToStart].map((b) => (b ? 1 : 0)).join("");
   // encodeURIComponent leaves "~" alone, but it is our separator.
   const enc = (s: string) => encodeURIComponent(s).replace(/~/g, "%7E");
   const pts = stops.map((s) => `${s.position.lat.toFixed(5)},${s.position.lng.toFixed(5)},${enc(s.label)}`);
@@ -67,6 +69,19 @@ export function decodeShare(hash: string): { stops: Stop[]; options: RouteOption
     avoidHighways: flags[0] === "1",
     avoidTolls: flags[1] === "1",
     avoidFerries: flags[2] === "1",
+    returnToStart: flags[3] === "1",
   };
-  return { stops, options };
+  return normalizeLoop(stops, options);
+}
+
+/**
+ * Older loops stored the finish as a copy of the start. Turn that into the
+ * "return to start" option so the finish can't drift from the start again.
+ */
+export function normalizeLoop(stops: Stop[], options: RouteOptions): { stops: Stop[]; options: RouteOptions } {
+  // Within 50 m counts as closed: GPX loops rarely end on the exact start coordinate.
+  const closed = stops.length > 2 && distance(stops[0].position, stops[stops.length - 1].position) < 50;
+  return closed
+    ? { stops: stops.slice(0, -1), options: { ...options, returnToStart: true } }
+    : { stops, options: { ...options, returnToStart: !!options.returnToStart } };
 }

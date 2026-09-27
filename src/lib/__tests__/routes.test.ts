@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { costing, defaultOptions, toResult, type ValhallaTrip } from "../routes";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { costing, defaultOptions, planRoute, toResult, type ValhallaTrip } from "../routes";
 
 /** Encode points as a precision-6 polyline, the format Valhalla returns. */
 function encode6(pts: [number, number][]): string {
@@ -71,5 +71,23 @@ describe("toResult", () => {
     expect(r.duration).toBe(900);
     expect(r.legs).toEqual([{ distance: 5000, duration: 400 }, { distance: 7500, duration: 500 }]);
     expect(r.steps.map((s) => s.instruction)).toEqual(["Drive north on B171.", "You have arrived."]);
+  });
+});
+
+describe("planRoute", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("forbids U-turns only at generated loop points", async () => {
+    const trip = { summary: { length: 1, time: 60 }, legs: [{ shape: "", summary: { length: 1, time: 60 } }] };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ trip }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const home = { lat: 47.26, lng: 11.4 };
+    await planRoute(
+      [{ pos: home }, { pos: { lat: 47.3, lng: 11.2 }, noUturn: true }, { pos: { lat: 47.1, lng: 11.3 } }, { pos: home }],
+      { ...defaultOptions, returnToStart: true },
+    );
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.locations.map((l: { type: string }) => l.type)).toEqual(["break", "break_through", "break", "break"]);
+    expect(body.locations[3]).toMatchObject({ lat: home.lat, lon: home.lng });
   });
 });

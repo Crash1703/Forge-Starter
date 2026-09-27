@@ -6,7 +6,7 @@ A motorcycle-focused route planner in the spirit of Calimoto, built entirely on 
 - **Ride styles**: *Fastest* (motorways allowed), *Scenic* (no motorways) or *Twisty*, which looks for the curviest roads.
 - **Motorcycle routing**: uses Valhalla's motorcycle profile, which prefers smaller roads as motorways are avoided and stays on paved roads.
 - **Avoid** motorways, tolls and ferries.
-- **Round trips**: pick a distance and get a loop from your start point. Press again for a different loop.
+- **Round trips**: pick a distance and get a loop from your start point. Press again for a different loop. With **Finish back at the start** ticked, any route ends where it began, however you edit it. Generated loop points forbid U-turns, so the loop doesn't ride up dead ends and back.
 - **Route details**: distance, riding time, a curviness rating, total climb, an elevation profile (hover it to see the spot on the map) and turn-by-turn directions.
 - **Save routes** in the browser, **share** them as a link, **import and export GPX** (for Garmin, TomTom, etc.) and hand off to the Google Maps app for live navigation.
 - Works on phones: the map sits on top and the planner below it. Follows the system light or dark theme.
