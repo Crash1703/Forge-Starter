@@ -140,6 +140,30 @@ export function roundTripWaypoints(
   return out;
 }
 
+/**
+ * How many metres of road the route rides twice, out and back, around the
+ * point of `path` nearest to `near`: the signature of a detour up a dead end
+ * (or to a turning circle) and back down the same road.
+ *
+ * A stretch counts as ridden twice when a point before the nearest one lies
+ * within `tolerance` metres of a point after it. Both passes follow the same
+ * road centreline, so they coincide; the parallel legs of a hairpin are
+ * further apart than that, so switchbacks aren't mistaken for spurs.
+ */
+export function outAndBack(path: LatLng[], near: LatLng, window = 3000, tolerance = 12): number {
+  const step = 20;
+  const pts = resample(path, step);
+  if (pts.length < 3) return 0;
+  let mid = 0;
+  for (let i = 1; i < pts.length; i++) if (distance(pts[i], near) < distance(pts[mid], near)) mid = i;
+  const span = Math.round(window / step);
+  const before = pts.slice(Math.max(0, mid - span), mid);
+  const after = pts.slice(mid + 1, mid + 1 + span);
+  let twice = 0;
+  for (const p of before) if (after.some((q) => distance(p, q) < tolerance)) twice += step;
+  return twice;
+}
+
 export function midpointOffset(a: LatLng, b: LatLng, fraction: number): LatLng {
   const d = distance(a, b);
   const brg = bearing(a, b);
