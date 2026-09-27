@@ -1,4 +1,4 @@
-import { curviness, distance, midpointOffset, type LatLng } from "./geo";
+import { curviness, distance, midpointOffset, outAndBack, type LatLng } from "./geo";
 import { decodePolyline } from "./polyline";
 import { VALHALLA_URL } from "./config";
 
@@ -70,6 +70,12 @@ export class RoutingError extends Error {
     super(message);
   }
 }
+
+/** Riding more than this far up a road and back down it counts as a dead-end spur. */
+const SPUR_METRES = 100;
+
+export const spurWarning = (stop: number) =>
+  `The route rides up and back down the same road to reach stop ${stop}. Move that pin onto a through road to avoid it.`;
 
 export const UTURN_WARNING =
   "One of your stops can only be reached by turning around, so the route turns back there. Move that pin onto a through road to avoid it.";
@@ -166,7 +172,8 @@ export function toResult(trip: ValhallaTrip, label: string, detours: LatLng[]): 
  * alternatives plus variants pushed off to either side of the longest leg by
  * an extra pass-through point), score each by how much the road bends per km,
  * and rank the curviest first. Candidates that take far longer than the
- * quickest one are dropped.
+ * quickest one, or that ride up a dead end and back to reach their helper
+ * point, are dropped.
  */
 export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal?: AbortSignal): Promise<RouteResult[]> {
   const stops = points.map((p) => p.pos);
@@ -184,11 +191,16 @@ export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal
     baseRoutes = await computeRoutes(base, opts, true, signal);
     turnsAround = true;
   }
-  const warnings = turnsAround ? [UTURN_WARNING] : [];
-  const results = baseRoutes.map((r, i) => ({
-    ...toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, []),
-    warnings,
-  }));
+  // Name any stop the route has to ride up and back to reach. Stops are
+  // numbered as in the stop list: A is 0, then 1, 2, ...; the last point
+  // (the finish, or the start again on a loop) is skipped.
+  const withWarnings = (r: RouteResult): RouteResult => {
+    const spurs = points
+      .slice(1, -1)
+      .flatMap((p, i) => (outAndBack(r.path, p.pos) > SPUR_METRES ? [spurWarning(i + 1)] : []));
+    return { ...r, warnings: spurs.length ? spurs : turnsAround ? [UTURN_WARNING] : [] };
+  };
+  const results = baseRoutes.map((r, i) => withWarnings(toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, [])));
 
   if (opts.style === "twisty" && stops.length < MAX_STOPS) {
     // Longest straight-line leg is where a detour has the most room to find better roads.
@@ -206,7 +218,11 @@ export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal
         const pts = [...base.slice(0, leg + 1), { pos: detour, via: true }, ...base.slice(leg + 1)];
         try {
           const [r] = await computeRoutes(pts, opts, false, signal);
-          results.push({ ...toResult(r, "Detour", [detour]), warnings });
+          const candidate = toResult(r, "Detour", [detour]);
+          // The helper point only exists to pull the route sideways. If
+          // reaching it means riding up a dead end and back, drop this option.
+          if (outAndBack(candidate.path, detour) > SPUR_METRES) continue;
+          results.push(withWarnings(candidate));
         } catch (e) {
           if ((e as Error).name === "AbortError") throw e;
           // A detour point in a lake or on a mountain top just has no route; skip it.

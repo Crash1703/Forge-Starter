@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { costing, defaultOptions, planRoute, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
+import { destination } from "../geo";
+import { costing, defaultOptions, planRoute, spurWarning, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
 
 /** Encode points as a precision-6 polyline, the format Valhalla returns. */
 function encode6(pts: [number, number][]): string {
@@ -123,5 +124,48 @@ describe("planRoute on a dead end", () => {
     await expect(
       planRoute([{ pos: { lat: 1, lng: 1 } }, { pos: { lat: 2, lng: 2 }, noUturn: true }, { pos: { lat: 1, lng: 1 } }], defaultOptions),
     ).rejects.toThrow(/busy/);
+  });
+});
+
+describe("twisty helper points", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const start = { lat: 47.0, lng: 11.0 };
+  const end = destination(start, 90, 20000);
+  const tripAlong = (pts: { lat: number; lng: number }[], km: number) => ({
+    summary: { length: km, time: km * 60 },
+    legs: [{ shape: encode6(pts.map((p) => [p.lat, p.lng])), summary: { length: km, time: km * 60 } }],
+  });
+
+  it("drops a detour that rides up a dead end to reach its helper point", async () => {
+    const straight = tripAlong([start, end], 20);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        const via = body.locations.find((l: { type: string }) => l.type === "through");
+        if (!via) return new Response(JSON.stringify({ trip: straight }), { status: 200 });
+        // Pretend the helper point sits at the top of a 400 m dead end off the main road.
+        const tip = { lat: via.lat, lng: via.lon };
+        const foot = destination(tip, 180, 400);
+        const spurTrip = tripAlong([start, foot, tip, foot, end], 21);
+        const cleanTrip = tripAlong([start, tip, end], 22);
+        // North-side helpers get the spur, south-side ones a clean route.
+        return new Response(JSON.stringify({ trip: via.lat > start.lat ? spurTrip : cleanTrip }), { status: 200 });
+      }),
+    );
+    const routes = await planRoute([{ pos: start }, { pos: end }], { ...defaultOptions, style: "twisty" });
+    const detourSides = routes.filter((r) => r.detours.length).map((r) => Math.sign(r.detours[0].lat - start.lat));
+    expect(detourSides.length).toBeGreaterThan(0);
+    expect(detourSides.every((s) => s < 0)).toBe(true);
+  });
+
+  it("names a stop the route has to ride up and back to reach", async () => {
+    const tip = destination(start, 90, 8000);
+    const foot = destination(tip, 180, 500);
+    const trip = tripAlong([start, foot, tip, foot, end], 21);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ trip }), { status: 200 })));
+    const [r] = await planRoute([{ pos: start }, { pos: tip }, { pos: end }], defaultOptions);
+    expect(r.warnings).toEqual([spurWarning(1)]);
   });
 });
