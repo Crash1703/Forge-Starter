@@ -88,7 +88,16 @@ export interface RoutePoint {
    * near a dead end the router would otherwise ride up and back down.
    */
   noUturn?: boolean;
+  /**
+   * Metres around `pos` within which any road will do. Lets the router pick a
+   * through road near a loosely placed point instead of the exact side street
+   * or dead end under it.
+   */
+  radius?: number;
 }
+
+/** Twisty's helper points only pull the route sideways; any road nearby will do. */
+const HELPER_RADIUS = 1500;
 
 interface Waypoint extends RoutePoint {
   /** Pass through without splitting the route into another leg. */
@@ -121,7 +130,12 @@ async function computeRoutes(
   signal?: AbortSignal,
 ): Promise<ValhallaTrip[]> {
   const body = {
-    locations: points.map((p) => ({ lat: p.pos.lat, lon: p.pos.lng, type: locationType(p) })),
+    locations: points.map((p) => ({
+      lat: p.pos.lat,
+      lon: p.pos.lng,
+      type: locationType(p),
+      ...(p.radius ? { radius: Math.round(p.radius) } : {}),
+    })),
     ...costing(opts),
     ...(alternatives && points.length === 2 ? { alternates: 2 } : {}),
     directions_options: { units: "kilometers", language: navigator.language || "en-US" },
@@ -191,6 +205,30 @@ export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal
     baseRoutes = await computeRoutes(base, opts, true, signal);
     turnsAround = true;
   }
+
+  // Banning U-turns can backfire: a pin on a side street makes the route
+  // ride on past it to find somewhere to turn, then come back. Where that
+  // happens, also try allowing a U-turn at those stops and keep whichever
+  // version rides less road twice.
+  const ridesTwice = (trip: ValhallaTrip) => {
+    const path = toResult(trip, "", []).path;
+    return points.slice(1, -1).map((p) => outAndBack(path, p.pos));
+  };
+  const twice = ridesTwice(baseRoutes[0]);
+  if (twice.some((m, i) => m > SPUR_METRES && points[i + 1].noUturn)) {
+    const relaxed = base.map((p, i) => (i > 0 && twice[i - 1] > SPUR_METRES ? { ...p, noUturn: false } : p));
+    try {
+      const other = await computeRoutes(relaxed, opts, true, signal);
+      const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+      if (sum(ridesTwice(other[0])) < sum(twice)) {
+        base = relaxed;
+        baseRoutes = other;
+      }
+    } catch (e) {
+      if ((e as Error).name === "AbortError") throw e;
+      // Keep the no-U-turn version.
+    }
+  }
   // Name any stop the route has to ride up and back to reach. Stops are
   // numbered as in the stop list: A is 0, then 1, 2, ...; the last point
   // (the finish, or the start again on a loop) is skipped.
@@ -215,7 +253,7 @@ export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal
       // Sequential, not parallel: the public server rate-limits bursts.
       for (const detour of variants) {
         if (signal?.aborted) break;
-        const pts = [...base.slice(0, leg + 1), { pos: detour, via: true }, ...base.slice(leg + 1)];
+        const pts = [...base.slice(0, leg + 1), { pos: detour, via: true, radius: HELPER_RADIUS }, ...base.slice(leg + 1)];
         try {
           const [r] = await computeRoutes(pts, opts, false, signal);
           const candidate = toResult(r, "Detour", [detour]);

@@ -135,6 +135,21 @@ describe("outAndBack", () => {
     expect(outAndBack(path, tip)).toBeGreaterThan(500);
   });
 
+  it("catches riding on past a stop to turn around and coming back", () => {
+    const beyond = destination(tip, 0, 800);
+    const path = [origin, junction, tip, beyond, tip, junction, east(junction, 2000)];
+    expect(outAndBack(path, tip)).toBeGreaterThan(700);
+  });
+
+  it("doesn't flag a long loop that leaves and returns on the same home road", () => {
+    // 1 km home road, then a 40 km loop, then the same home road back.
+    const gate = destination(origin, 0, 1000);
+    const loop = [0, 1, 2, 3].map((k) => destination(gate, 45 + 90 * k, 7000));
+    const path = [origin, gate, ...loop, gate, origin];
+    const stop = loop[1];
+    expect(outAndBack(path, stop)).toBe(0);
+  });
+
   it("ignores a stop the road simply passes through", () => {
     const path = [origin, junction, tip, destination(tip, 45, 3000)];
     expect(outAndBack(path, tip)).toBe(0);
