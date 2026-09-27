@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeShare, encodeShare } from "../storage";
+import { decodeShare, encodeShare, normalizeLoop } from "../storage";
 import { defaultOptions } from "../routes";
 
 describe("share links", () => {
@@ -17,5 +17,36 @@ describe("share links", () => {
   it("ignores unrelated hashes", () => {
     expect(decodeShare("#foo")).toBeNull();
     expect(decodeShare("#r=scenic.car.000~1,2,a")).toBeNull();
+  });
+});
+
+describe("loops", () => {
+  const home = { id: "h", label: "Home", position: { lat: 47.26921, lng: 11.4041 } };
+  const a = { id: "a", label: "Seefeld", position: { lat: 47.33, lng: 11.19 } };
+  const b = { id: "b", label: "Telfs", position: { lat: 47.3, lng: 11.07 } };
+
+  it("keeps the return-to-start flag in share links", () => {
+    const opts = { ...defaultOptions, returnToStart: true };
+    const back = decodeShare(encodeShare([home, a, b], opts))!;
+    expect(back.options.returnToStart).toBe(true);
+    expect(back.stops.map((s) => s.label)).toEqual(["Home", "Seefeld", "Telfs"]);
+  });
+
+  it("reads old links without the flag as one-way routes", () => {
+    const back = decodeShare("#r=scenic.motorcycle.000~47.1,11.1,A~47.2,11.2,B")!;
+    expect(back.options.returnToStart).toBe(false);
+  });
+
+  it("turns an old copied finish into the return-to-start option", () => {
+    const copy = { ...home, id: "h2", position: { lat: 47.2693, lng: 11.4042 } }; // ~15 m away
+    const plan = normalizeLoop([home, a, b, copy], defaultOptions);
+    expect(plan.stops.map((s) => s.id)).toEqual(["h", "a", "b"]);
+    expect(plan.options.returnToStart).toBe(true);
+  });
+
+  it("leaves a one-way route alone", () => {
+    const plan = normalizeLoop([home, a, b], defaultOptions);
+    expect(plan.stops).toHaveLength(3);
+    expect(plan.options.returnToStart).toBe(false);
   });
 });

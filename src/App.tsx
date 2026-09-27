@@ -19,6 +19,7 @@ import {
   encodeShare,
   loadSaved,
   newId,
+  normalizeLoop,
   storeSaved,
   type SavedRoute,
   type Stop,
@@ -29,6 +30,11 @@ const STYLES: { id: RouteStyle; name: string; hint: string }[] = [
   { id: "scenic", name: "Scenic", hint: "Avoids motorways, sensible detours" },
   { id: "twisty", name: "Twisty", hint: "Hunts for the curviest roads" },
 ];
+
+/** The stops in riding order, including the ride back to the start on a loop. */
+function ridePath(stops: Stop[], returnToStart: boolean): Stop[] {
+  return returnToStart && stops.length > 1 ? [...stops, stops[0]] : stops;
+}
 
 export default function App() {
   const shared = useMemo(() => decodeShare(location.hash), []);
@@ -60,7 +66,7 @@ export default function App() {
   }, []);
 
   // Recompute whenever the stops or options change (debounced so dragging feels calm).
-  const stopsKey = stops.map((s) => `${s.position.lat},${s.position.lng}`).join("|");
+  const stopsKey = stops.map((s) => `${s.position.lat},${s.position.lng}${s.auto ? "*" : ""}`).join("|");
   useEffect(() => {
     if (stops.length < 2) {
       setRoutes([]);
@@ -71,7 +77,8 @@ export default function App() {
     const ctrl = new AbortController();
     const t = window.setTimeout(() => {
       setBusy(true);
-      planRoute(stops.map((s) => s.position), options, ctrl.signal)
+      const points = ridePath(stops, options.returnToStart).map((s) => ({ pos: s.position, noUturn: s.auto }));
+      planRoute(points, options, ctrl.signal)
         .then((r) => {
           setRoutes(r);
           setSelected(0);
@@ -127,7 +134,7 @@ export default function App() {
   }
 
   function moveStop(id: string, position: LatLng) {
-    setStops((ss) => ss.map((s) => (s.id === id ? { ...s, position, label: "Locating…" } : s)));
+    setStops((ss) => ss.map((s) => (s.id === id ? { ...s, position, label: "Locating…", auto: false } : s)));
     labelStop(id, position);
   }
 
@@ -153,8 +160,9 @@ export default function App() {
     }
     const heading = Math.random() * 360;
     const pts = roundTripWaypoints(origin.position, loopKm * 1000, heading);
-    const via = pts.map((p) => ({ id: newId(), position: p, label: "Locating…" }));
-    setStops([origin, ...via, { ...origin, id: newId() }]);
+    const via = pts.map((p) => ({ id: newId(), position: p, label: "Locating…", auto: true }));
+    setStops([{ ...origin, auto: false }, ...via]);
+    setOptions((o) => ({ ...o, returnToStart: true }));
     via.forEach((v) => labelStop(v.id, v.position));
     wantFit.current = true;
   }
@@ -178,11 +186,16 @@ export default function App() {
     );
   }
 
+  function routeTitle() {
+    const start = stops[0].label;
+    return options.returnToStart ? `${start} loop` : `${start} → ${stops[stops.length - 1].label}`;
+  }
+
   function saveRoute() {
     if (!route) return;
     const entry: SavedRoute = {
       id: newId(),
-      name: name.trim() || `${stops[0].label} → ${stops[stops.length - 1].label}`,
+      name: name.trim() || routeTitle(),
       savedAt: Date.now(),
       stops,
       options,
@@ -197,8 +210,12 @@ export default function App() {
   }
 
   function openSaved(r: SavedRoute) {
-    setStops(r.stops.map((s) => ({ ...s, id: newId() })));
-    setOptions(r.options);
+    const plan = normalizeLoop(
+      r.stops.map((s) => ({ ...s, id: newId() })),
+      { ...defaultOptions, ...r.options },
+    );
+    setStops(plan.stops);
+    setOptions(plan.options);
     setName(r.name);
     wantFit.current = true;
     setTab("plan");
@@ -221,10 +238,10 @@ export default function App() {
 
   function exportGpx() {
     if (!route) return;
-    const title = name.trim() || `${stops[0].label} to ${stops[stops.length - 1].label}`;
+    const title = name.trim() || routeTitle();
     download(
       `${title.replace(/[^\w-]+/g, "_").slice(0, 60) || "route"}.gpx`,
-      toGpx({ name: title, waypoints: stops.map((s) => s.position), track: route.path }),
+      toGpx({ name: title, waypoints: ridePath(stops, options.returnToStart).map((s) => s.position), track: route.path }),
       "application/gpx+xml",
     );
   }
@@ -232,9 +249,13 @@ export default function App() {
   async function importGpx(file: File) {
     try {
       const data = parseGpx(await file.text());
-      const imported = data.waypoints.slice(0, 25).map((p) => ({ id: newId(), position: p, label: "Locating…" }));
-      setStops(imported);
-      imported.forEach((s) => labelStop(s.id, s.position));
+      const plan = normalizeLoop(
+        data.waypoints.slice(0, 25).map((p) => ({ id: newId(), position: p, label: "Locating…" })),
+        { ...options, returnToStart: false },
+      );
+      setStops(plan.stops);
+      setOptions(plan.options);
+      plan.stops.forEach((s) => labelStop(s.id, s.position));
       setName(data.name);
       wantFit.current = true;
       flash(data.waypoints.length > 25 ? "Imported the first 25 points (the routing limit)" : `Imported “${data.name}”`);
@@ -299,9 +320,7 @@ export default function App() {
                         dragFrom.current = null;
                       }}
                     >
-                      <span className={`badge ${i === 0 ? "start" : i === stops.length - 1 ? "end" : "via"}`}>
-                        {i === 0 ? "A" : i === stops.length - 1 ? "B" : i}
-                      </span>
+                      <StopBadge index={i} count={stops.length} loop={options.returnToStart} />
                       <span className="label" title={s.label}>
                         {s.label}
                       </span>
@@ -318,12 +337,27 @@ export default function App() {
                       </span>
                     </li>
                   ))}
+                  {options.returnToStart && stops.length > 1 && (
+                    <li className="finish-row">
+                      <span className="badge start">A</span>
+                      <span className="label">Back to {stops[0].label}</span>
+                    </li>
+                  )}
                 </ol>
               )}
 
               <div className="button-row">
                 <button onClick={locateMe}>◎ My location</button>
-                {stops.length > 1 && <button onClick={() => setStops((ss) => ss.slice().reverse())}>⇅ Reverse</button>}
+                {stops.length > 1 && (
+                  <button
+                    onClick={() =>
+                      // On a loop, keep the start and ride the loop the other way round.
+                      setStops((ss) => (options.returnToStart ? [ss[0], ...ss.slice(1).reverse()] : ss.slice().reverse()))
+                    }
+                  >
+                    ⇅ Reverse
+                  </button>
+                )}
                 {stops.length > 0 && (
                   <button
                     onClick={() => {
@@ -384,6 +418,14 @@ export default function App() {
 
             <section>
               <h2>Round trip</h2>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={options.returnToStart}
+                  onChange={(e) => setOpt("returnToStart", e.target.checked)}
+                />
+                Finish back at the start (A)
+              </label>
               <div className="loop">
                 <input
                   type="range"
@@ -397,7 +439,7 @@ export default function App() {
                 <output>{loopKm} km</output>
               </div>
               <button className="wide" onClick={() => makeLoop()} disabled={!stops.length}>
-                ↻ {stops.length > 2 && stops[0].position.lat === stops[stops.length - 1].position.lat ? "Try another loop" : "Make a loop from A"}
+                ↻ {options.returnToStart && stops.some((s) => s.auto) ? "Try another loop" : "Make a loop from A"}
               </button>
             </section>
 
@@ -458,8 +500,9 @@ export default function App() {
                       <button onClick={share}>Share</button>
                       <button
                         onClick={() => {
-                          const dest = stops[stops.length - 1].position;
-                          const way = stops.slice(1, -1).map((s) => `${s.position.lat},${s.position.lng}`).join("|");
+                          const ride = ridePath(stops, options.returnToStart);
+                          const dest = ride[ride.length - 1].position;
+                          const way = ride.slice(1, -1).map((s) => `${s.position.lat},${s.position.lng}`).join("|");
                           window.open(
                             `https://www.google.com/maps/dir/?api=1&origin=${stops[0].position.lat},${stops[0].position.lng}&destination=${dest.lat},${dest.lng}${way ? `&waypoints=${encodeURIComponent(way)}` : ""}&travelmode=driving`,
                             "_blank",
@@ -545,6 +588,7 @@ export default function App() {
         <MapErrorBoundary>
           <MapView
             stops={stops}
+            loop={options.returnToStart}
             routes={routes}
             selected={selected}
             hover={hover}
@@ -565,4 +609,10 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+/** A for the start, B for the finish, numbers in between. On a loop A is also the finish. */
+function StopBadge({ index, count, loop }: { index: number; count: number; loop: boolean }) {
+  const kind = index === 0 ? "start" : index === count - 1 && !loop ? "end" : "via";
+  return <span className={`badge ${kind}`}>{kind === "start" ? "A" : kind === "end" ? "B" : index}</span>;
 }
