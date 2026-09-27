@@ -1,12 +1,25 @@
 import { useEffect, useRef } from "react";
-import { GeolocateControl, LngLatBounds, Map as MapLibre, Marker, NavigationControl, setWorkerUrl, type GeoJSONSource } from "maplibre-gl";
+import { LngLatBounds, Map as MapLibre, Marker, NavigationControl, setWorkerUrl, type GeoJSONSource } from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { FeatureCollection } from "geojson";
-import { distance, pathLength, type LatLng } from "../lib/geo";
+import { distance, pathLength, twistSections, type LatLng } from "../lib/geo";
 import type { RouteResult } from "../lib/routes";
 import type { Stop } from "../lib/storage";
-import { MAP_STYLE } from "../lib/config";
+import { MAP_STYLE, MAP_STYLE_DARK } from "../lib/config";
+
+// MapLibre looks for its worker next to its own script, which bundling moves;
+// let Vite bundle the worker (with its shared chunk) and point MapLibre at it.
+setWorkerUrl(workerUrl);
+
+/** What Ride mode draws: the road still ahead, and where the rider is. */
+export interface RideLayer {
+  ahead: LatLng[];
+  position: LatLng | null;
+  heading: number | null;
+  /** Keep the camera on the rider, heading-up. */
+  follow: boolean;
+}
 
 interface Props {
   stops: Stop[];
@@ -17,29 +30,35 @@ interface Props {
   hover: LatLng | null;
   /** Changing this re-fits the view to the current route or stops. */
   fitKey: number;
+  theme: "light" | "dark";
+  /** Pixels of map hidden under the planner panel at the bottom (phones). */
+  insetBottom: number;
+  /** Pixels hidden under a top banner (Ride mode). */
+  insetTop?: number;
+  /** Where the rider is (outside Ride mode: after "locate me"). */
+  me: LatLng | null;
+  /** Set while riding; the planned routes and stop editing step aside. */
+  ride: RideLayer | null;
   onMapClick: (p: LatLng) => void;
   onStopMove: (id: string, p: LatLng) => void;
   onRouteClick: (p: LatLng, legIndex: number) => void;
   onSelectRoute: (i: number) => void;
-  onLocate?: (p: LatLng) => void;
+  onMapReady?: (map: MapLibre) => void;
+  /** The rider dragged the map while it was following them. */
+  onFollowBroken?: () => void;
 }
 
-// MapLibre looks for its worker next to its own script, which bundling moves;
-// let Vite bundle the worker (with its shared chunk) and point MapLibre at it.
-setWorkerUrl(workerUrl);
-
-const ROUTE = "#ff6a13";
 const ALT = "#8a94a6";
+/** Route colour by twistiness: easy, curvy, twisty, very twisty. */
+export const TWIST_COLOURS = ["#f5a25d", "#ff6a13", "#e8363d", "#b0126b"];
 
 type Geo = FeatureCollection;
+const EMPTY: Geo = { type: "FeatureCollection", features: [] };
 const coords = (path: LatLng[]) => path.map((p) => [p.lng, p.lat]);
-const lines = (routes: { path: LatLng[]; idx: number }[]): Geo => ({
-  type: "FeatureCollection",
-  features: routes.map((r) => ({
-    type: "Feature",
-    properties: { idx: r.idx },
-    geometry: { type: "LineString", coordinates: coords(r.path) },
-  })),
+const line = (path: LatLng[], properties: Record<string, number> = {}) => ({
+  type: "Feature" as const,
+  properties,
+  geometry: { type: "LineString" as const, coordinates: coords(path) },
 });
 const points = (pts: LatLng[]): Geo => ({
   type: "FeatureCollection",
@@ -72,45 +91,67 @@ function legAt(route: RouteResult, p: LatLng): number {
 export default function MapView(props: Props) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibre | null>(null);
-  const ready = useRef<Promise<void> | null>(null);
   const markers = useRef(new globalThis.Map<string, { marker: Marker; el: HTMLDivElement }>());
+  const puck = useRef<{ marker: Marker; el: HTMLDivElement } | null>(null);
+  // Latest data for each source, so it can be re-applied after a style switch.
+  const data = useRef<Record<string, Geo>>({ alts: EMPTY, route: EMPTY, dots: EMPTY, hover: EMPTY, ride: EMPTY });
   // Handlers change every render; listeners read the latest through this ref.
   const cb = useRef(props);
   cb.current = props;
+
+  const setData = (id: string, geo: Geo) => {
+    data.current[id] = geo;
+    const src = map.current?.getSource(id) as GeoJSONSource | undefined;
+    src?.setData(geo);
+  };
 
   useEffect(() => {
     if (!el.current) return;
     const m = new MapLibre({
       container: el.current,
-      style: MAP_STYLE,
-      center: [11.4, 47.3],
+      style: props.theme === "dark" ? MAP_STYLE_DARK : MAP_STYLE,
+      center: [153.0, -27.0],
       zoom: 7,
       attributionControl: { compact: true },
     });
-    m.addControl(new NavigationControl({ visualizePitch: false }), "top-right");
-    const geo = new GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: false });
-    geo.on("geolocate", (e) => cb.current.onLocate?.({ lat: e.coords.latitude, lng: e.coords.longitude }));
-    m.addControl(geo, "top-right");
+    // Zoom buttons for mouse users; phones pinch.
+    if (window.matchMedia("(min-width: 761px)").matches) {
+      m.addControl(new NavigationControl({ visualizePitch: false }), "bottom-right");
+    }
 
-    ready.current = new Promise((resolve) =>
-      m.on("load", () => {
-        const empty: Geo = { type: "FeatureCollection", features: [] };
-        for (const id of ["alts", "route", "dots", "hover"]) m.addSource(id, { type: "geojson", data: empty });
-        const round = { "line-cap": "round", "line-join": "round" } as const;
-        m.addLayer({ id: "alts", type: "line", source: "alts", layout: round, paint: { "line-color": ALT, "line-width": 5, "line-opacity": 0.8 } });
-        m.addLayer({ id: "route-casing", type: "line", source: "route", layout: round, paint: { "line-color": "#1b1f24", "line-width": 9, "line-opacity": 0.5 } });
-        m.addLayer({ id: "route", type: "line", source: "route", layout: round, paint: { "line-color": ROUTE, "line-width": 6 } });
-        const dot = { "circle-color": ROUTE, "circle-stroke-color": "#fff", "circle-stroke-width": 2.5 };
-        m.addLayer({ id: "dots", type: "circle", source: "dots", paint: { ...dot, "circle-radius": 5 } });
-        m.addLayer({ id: "hover", type: "circle", source: "hover", paint: { ...dot, "circle-radius": 7 } });
-        resolve();
-      }),
-    );
+    // Our sources and layers, (re-)added whenever a map style finishes loading.
+    m.on("style.load", () => {
+      for (const id of ["alts", "route", "dots", "hover", "ride"]) {
+        if (!m.getSource(id)) m.addSource(id, { type: "geojson", data: data.current[id] });
+      }
+      const round = { "line-cap": "round", "line-join": "round" } as const;
+      const add = (layer: Parameters<MapLibre["addLayer"]>[0]) => {
+        if (!m.getLayer(layer.id)) m.addLayer(layer);
+      };
+      add({ id: "alts", type: "line", source: "alts", layout: round, paint: { "line-color": ALT, "line-width": 5, "line-opacity": 0.8 } });
+      add({ id: "route-casing", type: "line", source: "route", layout: round, paint: { "line-color": "#1b1f24", "line-width": 9, "line-opacity": 0.55 } });
+      add({
+        id: "route",
+        type: "line",
+        source: "route",
+        layout: round,
+        paint: {
+          "line-color": ["match", ["get", "level"], 1, TWIST_COLOURS[1], 2, TWIST_COLOURS[2], 3, TWIST_COLOURS[3], TWIST_COLOURS[0]],
+          "line-width": 6,
+        },
+      });
+      add({ id: "ride-casing", type: "line", source: "ride", layout: round, paint: { "line-color": "#0b3d91", "line-width": 12, "line-opacity": 0.5 } });
+      add({ id: "ride", type: "line", source: "ride", layout: round, paint: { "line-color": "#2f7bff", "line-width": 8 } });
+      const dot = { "circle-color": TWIST_COLOURS[1], "circle-stroke-color": "#fff", "circle-stroke-width": 2.5 };
+      add({ id: "dots", type: "circle", source: "dots", paint: { ...dot, "circle-radius": 5 } });
+      add({ id: "hover", type: "circle", source: "hover", paint: { ...dot, "circle-radius": 7 } });
+    });
 
     m.on("click", (e) => {
+      if (cb.current.ride) return;
       const box: [[number, number], [number, number]] = [
-        [e.point.x - 6, e.point.y - 6],
-        [e.point.x + 6, e.point.y + 6],
+        [e.point.x - 8, e.point.y - 8],
+        [e.point.x + 8, e.point.y + 8],
       ];
       const hits = m.getLayer("route") ? m.queryRenderedFeatures(box, { layers: ["route", "alts"] }) : [];
       const p = { lat: e.lngLat.lat, lng: e.lngLat.lng };
@@ -125,19 +166,43 @@ export default function MapView(props: Props) {
       m.on("mouseenter", layer, () => (m.getCanvas().style.cursor = "pointer"));
       m.on("mouseleave", layer, () => (m.getCanvas().style.cursor = ""));
     }
+    // A drag by the rider (not our own camera moves) stops follow mode.
+    m.on("dragstart", () => {
+      if (cb.current.ride?.follow) cb.current.onFollowBroken?.();
+    });
     map.current = m;
+    cb.current.onMapReady?.(m);
     return () => {
       m.remove();
       map.current = null;
       markers.current.clear();
+      puck.current = null;
     };
+    // The initial theme only; later changes go through setStyle below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Stop markers
+  // Day / night map
+  const firstTheme = useRef(true);
+  useEffect(() => {
+    if (firstTheme.current) {
+      firstTheme.current = false;
+      return;
+    }
+    map.current?.setStyle(props.theme === "dark" ? MAP_STYLE_DARK : MAP_STYLE);
+  }, [props.theme]);
+
+  // Keep the visible middle of the map above the planner panel.
+  useEffect(() => {
+    map.current?.setPadding({ top: props.insetTop ?? 0, left: 0, right: 0, bottom: props.insetBottom });
+  }, [props.insetBottom, props.insetTop]);
+
+  // Stop markers (fixed in place while riding).
   useEffect(() => {
     const m = map.current;
     if (!m) return;
     const seen = new Set<string>();
+    const riding = !!props.ride;
     props.stops.forEach((s, i) => {
       const kind = i === 0 ? "start" : i === props.stops.length - 1 && !props.loop ? "end" : "via";
       seen.add(s.id);
@@ -153,6 +218,7 @@ export default function MapView(props: Props) {
         markers.current.set(s.id, entry);
       }
       entry.marker.setLngLat([s.position.lng, s.position.lat]);
+      entry.marker.setDraggable(!riding);
       entry.el.className = `pin pin-${kind}`;
       entry.el.textContent = kind === "start" ? "A" : kind === "end" ? "B" : String(i);
       entry.el.title = kind === "start" && props.loop ? `${s.label} (start and finish)` : s.label;
@@ -163,24 +229,73 @@ export default function MapView(props: Props) {
         markers.current.delete(id);
       }
     }
-  }, [props.stops, props.loop]);
-
-  // Route lines: alternatives underneath, selected route on top with a casing.
-  useEffect(() => {
-    const { routes, selected } = props;
-    ready.current?.then(() => {
-      const m = map.current;
-      if (!m) return;
-      const sel = routes[selected];
-      (m.getSource("alts") as GeoJSONSource).setData(
-        lines(routes.map((r, idx) => ({ path: r.path, idx })).filter((r) => r.idx !== selected)),
-      );
-      (m.getSource("route") as GeoJSONSource).setData(lines(sel ? [{ path: sel.path, idx: selected }] : []));
-      // Pass-through points the twisty planner added, so riders can see why the route bends away.
-      (m.getSource("dots") as GeoJSONSource).setData(points(sel?.detours ?? []));
-    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.routes, props.selected]);
+  }, [props.stops, props.loop, !!props.ride]);
+
+  // Route lines: alternatives underneath, selected route on top, coloured by twistiness.
+  useEffect(() => {
+    const { routes, selected, ride } = props;
+    const sel = routes[selected];
+    setData("alts", {
+      type: "FeatureCollection",
+      features: ride ? [] : routes.flatMap((r, idx) => (idx === selected ? [] : [line(r.path, { idx })])),
+    });
+    setData("route", {
+      type: "FeatureCollection",
+      features: sel ? twistSections(sel.path).map((s) => line(s.path, { level: s.level })) : [],
+    });
+    // Pass-through points the twisty planner added, so riders can see why the route bends away.
+    setData("dots", points(ride ? [] : (sel?.detours ?? [])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.routes, props.selected, !!props.ride]);
+
+  // Ride mode: the road ahead in blue on top.
+  useEffect(() => {
+    const ahead = props.ride?.ahead ?? [];
+    setData("ride", { type: "FeatureCollection", features: ahead.length > 1 ? [line(ahead)] : [] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.ride?.ahead]);
+
+  // The rider's position arrow, and the follow camera.
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    const pos = props.ride?.position ?? props.me;
+    if (!pos) {
+      puck.current?.marker.remove();
+      puck.current = null;
+      return;
+    }
+    if (!puck.current) {
+      const dotEl = document.createElement("div");
+      dotEl.className = "puck";
+      puck.current = {
+        marker: new Marker({ element: dotEl, rotationAlignment: "map" }).setLngLat([pos.lng, pos.lat]).addTo(m),
+        el: dotEl,
+      };
+    }
+    const heading = props.ride?.heading;
+    puck.current.marker.setLngLat([pos.lng, pos.lat]);
+    puck.current.el.classList.toggle("puck-heading", heading != null);
+    puck.current.marker.setRotation(heading ?? 0);
+    if (props.ride?.follow) {
+      m.easeTo({
+        center: [pos.lng, pos.lat],
+        bearing: heading ?? m.getBearing(),
+        zoom: Math.max(m.getZoom(), 15.5),
+        pitch: 45,
+        duration: 900,
+      });
+    }
+  }, [props.ride?.position, props.ride?.heading, props.ride?.follow, props.me]);
+
+  // Back to a flat north-up map after riding.
+  const wasRiding = useRef(false);
+  useEffect(() => {
+    const riding = !!props.ride;
+    if (wasRiding.current && !riding) map.current?.easeTo({ pitch: 0, bearing: 0, duration: 600 });
+    wasRiding.current = riding;
+  }, [props.ride]);
 
   // Fit view on request.
   useEffect(() => {
@@ -194,15 +309,14 @@ export default function MapView(props: Props) {
     }
     const b = new LngLatBounds();
     pts.forEach((p) => b.extend([p.lng, p.lat]));
-    m.fitBounds(b, { padding: 60, duration: 600 });
+    m.fitBounds(b, { padding: 50, duration: 600 });
     // Only fit on explicit requests, not on every route update.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.fitKey]);
 
   // Elevation-chart hover marker
   useEffect(() => {
-    const hover = props.hover;
-    ready.current?.then(() => (map.current?.getSource("hover") as GeoJSONSource | undefined)?.setData(points(hover ? [hover] : [])));
+    setData("hover", points(props.hover ? [props.hover] : []));
   }, [props.hover]);
 
   return <div ref={el} className="map" />;

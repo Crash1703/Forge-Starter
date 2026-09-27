@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Map as MapLibre } from "maplibre-gl";
 import MapView from "./components/MapView";
+import BottomSheet, { type Snap } from "./components/BottomSheet";
+import TwistGauge from "./components/TwistGauge";
+import RideView from "./components/RideView";
+import type { RideLayer } from "./components/MapView";
 import MapErrorBoundary from "./components/MapErrorBoundary";
 import PlaceSearch from "./components/PlaceSearch";
 import ElevationChart from "./components/ElevationChart";
 import {
+  countBends,
   curvinessLabel,
   formatDistance,
   formatDuration,
+  isDaylight,
   roundTripWaypoints,
+  twistScore,
   type LatLng,
 } from "./lib/geo";
 import { defaultOptions, planRoute, type RouteOptions, type RouteResult, type RouteStyle } from "./lib/routes";
@@ -35,6 +43,17 @@ const STYLES: { id: RouteStyle; name: string; hint: string }[] = [
 /** Short commit ID of this build, shown in the footer so riders can tell whether a refresh picked up an update. */
 const BUILD = (import.meta.env.VITE_BUILD_ID as string | undefined)?.slice(0, 7) || "dev";
 
+type MapTheme = "auto" | "light" | "dark";
+const THEME_KEY = "forge.mapTheme";
+const loadTheme = (): MapTheme => {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    return t === "light" || t === "dark" ? t : "auto";
+  } catch {
+    return "auto";
+  }
+};
+
 /** The stops in riding order, including the ride back to the start on a loop. */
 function ridePath(stops: Stop[], returnToStart: boolean): Stop[] {
   return returnToStart && stops.length > 1 ? [...stops, stops[0]] : stops;
@@ -58,11 +77,62 @@ export default function App() {
   const [showSteps, setShowSteps] = useState(false);
   const [toast, setToast] = useState("");
   const [center, setCenter] = useState<LatLng | undefined>();
+  const [me, setMe] = useState<LatLng | null>(null);
+  const [snap, setSnap] = useState<Snap>(shared ? "half" : "peek");
+  const [cover, setCover] = useState(0);
+  const [themePref, setThemePref] = useState<MapTheme>(loadTheme);
+  const [daylight, setDaylight] = useState(true);
+  const mapRef = useRef<MapLibre | null>(null);
+  const [riding, setRiding] = useState<{ simulate: boolean } | null>(null);
+  const [rideLayer, setRideLayer] = useState<RideLayer | null>(null);
+  const [followBreaks, setFollowBreaks] = useState(0);
   const wantFit = useRef(!!shared);
   const dragFrom = useRef<number | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const route = routes[selected];
+  const bends = useMemo(() => (route ? countBends(route.path) : 0), [route]);
+
+  // Auto map theme: dark from dusk to dawn where the map is (checked every 5 minutes).
+  useEffect(() => {
+    const check = () => {
+      const c = mapRef.current?.getCenter();
+      const here = me ?? center ?? stops[0]?.position ?? (c ? { lat: c.lat, lng: c.lng } : undefined);
+      setDaylight(here ? isDaylight(here) : true);
+    };
+    check();
+    const t = window.setInterval(check, 5 * 60_000);
+    return () => clearInterval(t);
+  }, [me, center, stops]);
+  const theme = themePref === "auto" ? (daylight ? "light" : "dark") : themePref;
+
+  function cycleTheme() {
+    const next: MapTheme = themePref === "auto" ? "light" : themePref === "light" ? "dark" : "auto";
+    setThemePref(next);
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch {
+      /* remembered for this visit only */
+    }
+    flash(next === "auto" ? "Map: automatic (dark after sunset)" : next === "light" ? "Map: day" : "Map: night");
+  }
+
+  function centreOnMe() {
+    if (!navigator.geolocation) {
+      flash("Location isn't available here");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setMe(p);
+        setCenter(p);
+        mapRef.current?.easeTo({ center: [p.lng, p.lat], zoom: Math.max(mapRef.current.getZoom(), 13) });
+      },
+      () => flash("Couldn't get your location. Check location permission."),
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }
 
   const flash = useCallback((msg: string) => {
     setToast(msg);
@@ -97,6 +167,7 @@ export default function App() {
       planRoute(points, options, ctrl.signal)
         .then((r) => {
           setRoutes(r);
+          setSnap((s) => (s === "peek" ? "half" : s));
           setSelected(0);
           setError("");
           if (wantFit.current) {
@@ -288,8 +359,51 @@ export default function App() {
   const setOpt = <K extends keyof RouteOptions>(k: K, v: RouteOptions[K]) => setOptions((o) => ({ ...o, [k]: v }));
 
   return (
-    <div className="app">
-      <aside className="panel">
+    <div className={`app${riding ? " riding" : ""}`}>
+      {riding && route ? (
+        <RideView
+          route={route}
+          options={options}
+          loop={options.returnToStart}
+          simulate={riding.simulate}
+          followBreaks={followBreaks}
+          onLayer={setRideLayer}
+          onExit={() => {
+            setRiding(null);
+            setRideLayer(null);
+          }}
+        />
+      ) : (
+      <BottomSheet snap={snap} onSnap={setSnap} onCover={setCover}>
+        {(route || busy) && (
+          <section className="summary" aria-live="polite">
+            {busy && <div className="progress" />}
+            {route ? (
+              <>
+                <TwistGauge curviness={route.curviness} />
+                <div className="summary-text">
+                  <strong>
+                    {formatDistance(route.distance)} · {formatDuration(route.duration)}
+                  </strong>
+                  <span>
+                    {bends} bends{profile ? ` · ${Math.round(profile.ascent)} m climb` : ""}
+                    {options.returnToStart ? " · loop" : ""}
+                  </span>
+                  <button className="link preview" onClick={() => setRiding({ simulate: true })} disabled={busy}>
+                    ▷ Preview ride
+                  </button>
+                </div>
+                <button className="ride-go primary" onClick={() => setRiding({ simulate: false })} disabled={busy}>
+                  Ride
+                </button>
+              </>
+            ) : (
+              <div className="summary-text">
+                <strong>Planning your route…</strong>
+              </div>
+            )}
+          </section>
+        )}
         <header className="brand">
           <span className="logo" aria-hidden>
             ◆
@@ -308,11 +422,16 @@ export default function App() {
         {tab === "plan" ? (
           <div className="scroll">
             <section>
+              <div onFocusCapture={() => setSnap("full")}>
               <PlaceSearch
                 near={stops[stops.length - 1]?.position ?? center}
                 placeholder={stops.length ? "Add a stop or destination" : "Search for a start point"}
-                onPick={(label, p) => addStop(p, label)}
+                onPick={(label, p) => {
+                  addStop(p, label);
+                  setSnap("half");
+                }}
               />
+              </div>
               <p className="hint">Or tap the map to add stops. Tap the route line to add a stop there, and drag pins to adjust.</p>
 
               {stops.length > 0 && (
@@ -472,7 +591,9 @@ export default function App() {
                             <span>
                               {formatDistance(r.distance)} · {formatDuration(r.duration)}
                             </span>
-                            <span className="curvy">{curvinessLabel(r.curviness)}</span>
+                            <span className="curvy" title={curvinessLabel(r.curviness)}>
+                              {twistScore(r.curviness).toFixed(1)}
+                            </span>
                           </button>
                         ))}
                       </div>
@@ -487,8 +608,8 @@ export default function App() {
                         <dd>{formatDuration(route.duration)}</dd>
                       </div>
                       <div>
-                        <dt>Curves</dt>
-                        <dd title={`${Math.round(route.curviness)}° of turning per km`}>{curvinessLabel(route.curviness)}</dd>
+                        <dt>Bends</dt>
+                        <dd title={`${Math.round(route.curviness)}° of turning per km`}>{bends}</dd>
                       </div>
                       {profile && (
                         <div>
@@ -525,7 +646,7 @@ export default function App() {
                         }}
                         title="Open in Google Maps for turn-by-turn navigation (it re-routes, max 9 stops)"
                       >
-                        Navigate
+                        Google Maps
                       </button>
                     </div>
 
@@ -597,9 +718,10 @@ export default function App() {
           <a href="https://photon.komoot.io" target="_blank" rel="noreferrer">Photon</a> · elevation{" "}
           <a href="https://open-meteo.com" target="_blank" rel="noreferrer">Open-Meteo</a> · version {BUILD}
         </footer>
-      </aside>
+      </BottomSheet>
+      )}
 
-      <main className="map-wrap">
+      <main className={`map-wrap${riding ? " riding" : ""}`}>
         <MapErrorBoundary>
           <MapView
             stops={stops}
@@ -608,17 +730,34 @@ export default function App() {
             selected={selected}
             hover={hover}
             fitKey={fitKey}
+            theme={theme}
+            insetBottom={riding ? 110 : cover}
+            insetTop={riding ? 220 : 0}
+            me={me}
+            ride={riding ? (rideLayer ?? { ahead: route?.path ?? [], position: null, heading: null, follow: true }) : null}
+            onFollowBroken={() => setFollowBreaks((n) => n + 1)}
+            onMapReady={(m) => (mapRef.current = m)}
             onMapClick={(p) => addStop(p)}
             onStopMove={moveStop}
             onRouteClick={(p, leg) => addStop(p, undefined, leg + 1)}
             onSelectRoute={setSelected}
-            onLocate={setCenter}
           />
         </MapErrorBoundary>
-        {route && (
-          <button className="fit" onClick={() => setFitKey((k) => k + 1)} aria-label="Zoom to route">
-            ⤢
+        {!riding && (
+        <div className="fabs">
+          <button className="fab" onClick={cycleTheme} aria-label={`Map style: ${themePref}. Change`} title="Day, night or automatic map">
+            <span aria-hidden>{themePref === "auto" ? "◐" : themePref === "light" ? "☀" : "☾"}</span>
+            <small>{themePref === "auto" ? "Auto" : themePref === "light" ? "Day" : "Night"}</small>
           </button>
+          <button className="fab" onClick={centreOnMe} aria-label="Show my location">
+            <span aria-hidden>◎</span>
+          </button>
+          {route && (
+            <button className="fab" onClick={() => setFitKey((k) => k + 1)} aria-label="Zoom to route">
+              <span aria-hidden>⤢</span>
+            </button>
+          )}
+        </div>
         )}
         {toast && <div className="toast">{toast}</div>}
       </main>

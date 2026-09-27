@@ -184,6 +184,100 @@ export function outAndBack(path: LatLng[], near: LatLng, window = 5000, toleranc
   return (twice.size * step) / 2;
 }
 
+/** A 0–10 twistiness score from degrees of turning per km (the "Calimeter" idea). */
+export const twistScore = (curvinessDegPerKm: number) => Math.min(10, Math.max(0, curvinessDegPerKm / 20));
+
+/**
+ * Number of real bends: runs of turning in one direction that add up to at
+ * least `minTurn` degrees. Small wobbles don't end a bend, a long straight
+ * does, and a change of direction starts a new one (an S-bend counts twice).
+ */
+export function countBends(path: LatLng[], minTurn = 30): number {
+  const step = 25;
+  const pts = resample(path, step);
+  if (pts.length < 3) return 0;
+  let bends = 0;
+  let sum = 0; // signed degrees in the current bend
+  let calm = 0; // consecutive near-straight samples
+  const close = () => {
+    if (Math.abs(sum) >= minTurn) bends++;
+    sum = 0;
+  };
+  let prev = bearing(pts[0], pts[1]);
+  for (let i = 2; i < pts.length; i++) {
+    const cur = bearing(pts[i - 1], pts[i]);
+    const t = turnAngle(prev, cur);
+    prev = cur;
+    if (Math.abs(t) > 120) {
+      close(); // a U-turn or junction, not a bend
+      continue;
+    }
+    if (Math.abs(t) < 2) {
+      if (++calm >= 8) close(); // ~200 m of straight ends the bend
+      continue;
+    }
+    calm = 0;
+    if (sum !== 0 && Math.sign(t) !== Math.sign(sum)) close();
+    sum += t;
+  }
+  close();
+  return bends;
+}
+
+export type TwistLevel = 0 | 1 | 2 | 3;
+
+/**
+ * Split a route into ~`length`-metre sections, each tagged with how twisty
+ * it is, for colouring the route line: 0 easy, 1 curvy, 2 twisty, 3 very twisty.
+ */
+export function twistSections(path: LatLng[], length = 400): { path: LatLng[]; level: TwistLevel }[] {
+  const pts = resample(path, 25);
+  const per = Math.max(2, Math.round(length / 25));
+  const out: { path: LatLng[]; level: TwistLevel }[] = [];
+  for (let i = 0; i < pts.length - 1; i += per) {
+    // Overlap by one point so sections join up without gaps.
+    const chunk = pts.slice(i, i + per + 1);
+    const c = curvinessOfChunk(chunk);
+    const level: TwistLevel = c >= 180 ? 3 : c >= 100 ? 2 : c >= 45 ? 1 : 0;
+    const last = out[out.length - 1];
+    if (last && last.level === level) last.path.push(...chunk.slice(1));
+    else out.push({ path: chunk, level });
+  }
+  return out;
+}
+
+/** Curviness of an already-resampled chunk (degrees per km). */
+function curvinessOfChunk(pts: LatLng[]): number {
+  if (pts.length < 3) return 0;
+  let total = 0;
+  for (let i = 2; i < pts.length; i++) {
+    total += Math.min(Math.abs(turnAngle(bearing(pts[i - 2], pts[i - 1]), bearing(pts[i - 1], pts[i]))), 120);
+  }
+  const km = pathLength(pts) / 1000;
+  return km > 0 ? total / km : 0;
+}
+
+/**
+ * Sun elevation in degrees at a place and time (NOAA's approximation; good to
+ * a fraction of a degree, plenty for choosing a day or night map).
+ */
+export function sunElevation(p: LatLng, date: Date): number {
+  const day = date.getTime() / 86400000 + 2440587.5 - 2451545; // days since J2000
+  const g = rad((357.529 + 0.98560028 * day) % 360); // mean anomaly
+  const q = (280.459 + 0.98564736 * day) % 360; // mean longitude
+  const L = rad(q + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)); // ecliptic longitude
+  const e = rad(23.439 - 0.00000036 * day); // obliquity
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L));
+  const gmst = (18.697374558 + 24.06570982441908 * day) % 24;
+  const hourAngle = rad(gmst * 15 + p.lng) - ra;
+  const lat = rad(p.lat);
+  return deg(Math.asin(Math.sin(lat) * Math.sin(dec) + Math.cos(lat) * Math.cos(dec) * Math.cos(hourAngle)));
+}
+
+/** Daylight, counting civil twilight as light enough for the day map. */
+export const isDaylight = (p: LatLng, date = new Date()) => sunElevation(p, date) > -6;
+
 /** Coarse spatial index: resampled points bucketed into `cell`-metre squares. */
 function pointGrid(paths: LatLng[][], step: number, cell: number) {
   const ref = paths.find((p) => p.length)?.[0] ?? { lat: 0, lng: 0 };
