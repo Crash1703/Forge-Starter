@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { autocomplete, placeLocation, type Suggestion } from "../lib/places";
+import { autocomplete, type Suggestion } from "../lib/places";
 import type { LatLng } from "../lib/geo";
 
 interface Props {
-  apiKey: string;
   near?: LatLng;
   placeholder: string;
   onPick: (name: string, position: LatLng) => void;
 }
 
-export default function PlaceSearch({ apiKey, near, placeholder, onPick }: Props) {
+export default function PlaceSearch({ near, placeholder, onPick }: Props) {
   const [text, setText] = useState("");
   const [items, setItems] = useState<Suggestion[]>([]);
   const [active, setActive] = useState(0);
@@ -24,7 +23,7 @@ export default function PlaceSearch({ apiKey, near, placeholder, onPick }: Props
     }
     const ctrl = new AbortController();
     const t = setTimeout(() => {
-      autocomplete(apiKey, text, nearRef.current, ctrl.signal)
+      autocomplete(text, nearRef.current, ctrl.signal)
         .then((s) => {
           setItems(s);
           setActive(0);
@@ -36,17 +35,12 @@ export default function PlaceSearch({ apiKey, near, placeholder, onPick }: Props
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [text, apiKey]);
+  }, [text]);
 
-  async function pick(s: Suggestion) {
+  function pick(s: Suggestion) {
     setItems([]);
     setText("");
-    try {
-      const place = await placeLocation(apiKey, s.placeId);
-      onPick(s.main || place.name, place.position);
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    onPick(s.main, s.position);
   }
 
   return (
@@ -70,7 +64,7 @@ export default function PlaceSearch({ apiKey, near, placeholder, onPick }: Props
         <ul className="suggestions" role="listbox">
           {items.map((s, i) => (
             <li
-              key={s.placeId}
+              key={s.id}
               role="option"
               aria-selected={i === active}
               className={i === active ? "active" : ""}

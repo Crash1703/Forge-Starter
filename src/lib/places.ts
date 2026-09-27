@@ -1,79 +1,64 @@
 import type { LatLng } from "./geo";
+import { PHOTON_URL } from "./config";
 
 export interface Suggestion {
-  placeId: string;
+  id: string;
   main: string;
   secondary: string;
+  position: LatLng;
 }
 
-let sessionToken = crypto.randomUUID();
-
-/** Places API (New) autocomplete, biased towards `near` when given. */
-export async function autocomplete(
-  key: string,
-  input: string,
-  near?: LatLng,
-  signal?: AbortSignal,
-): Promise<Suggestion[]> {
-  const res = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
-    method: "POST",
-    signal,
-    headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key },
-    body: JSON.stringify({
-      input,
-      sessionToken,
-      ...(near
-        ? { locationBias: { circle: { center: { latitude: near.lat, longitude: near.lng }, radius: 50000 } } }
-        : {}),
-    }),
-  });
-  if (!res.ok) throw new Error((await res.json().catch(() => null))?.error?.message ?? "Place search failed");
-  const json: { suggestions?: { placePrediction?: Prediction }[] } = await res.json();
-  return (json.suggestions ?? []).flatMap(({ placePrediction: p }) =>
-    p
-      ? [{
-          placeId: p.placeId,
-          main: p.structuredFormat?.mainText?.text ?? p.text?.text ?? "",
-          secondary: p.structuredFormat?.secondaryText?.text ?? "",
-        }]
-      : [],
-  );
-}
-
-interface Prediction {
-  placeId: string;
-  text?: { text: string };
-  structuredFormat?: { mainText?: { text: string }; secondaryText?: { text: string } };
-}
-
-export async function placeLocation(key: string, placeId: string): Promise<{ name: string; position: LatLng }> {
-  const res = await fetch(
-    `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}?sessionToken=${sessionToken}`,
-    { headers: { "X-Goog-Api-Key": key, "X-Goog-FieldMask": "displayName,location" } },
-  );
-  // A details call ends the autocomplete billing session.
-  sessionToken = crypto.randomUUID();
-  if (!res.ok) throw new Error("Could not look up that place");
-  const p = await res.json();
-  return {
-    name: p.displayName?.text ?? "Place",
-    position: { lat: p.location.latitude, lng: p.location.longitude },
+/** The parts of a Photon GeoJSON feature we use. */
+interface PhotonFeature {
+  geometry: { coordinates: [number, number] };
+  properties: {
+    osm_type?: string;
+    osm_id?: number;
+    name?: string;
+    street?: string;
+    housenumber?: string;
+    city?: string;
+    district?: string;
+    county?: string;
+    state?: string;
+    country?: string;
   };
 }
 
-/** Best-effort short name for a clicked point, using the Maps JS geocoder. */
+export function toSuggestion(f: PhotonFeature): Suggestion {
+  const p = f.properties;
+  const street = [p.street, p.housenumber].filter(Boolean).join(" ");
+  const main = p.name || street || p.city || p.county || "Unnamed place";
+  const secondary = [p.name && street, p.city !== main && p.city, p.state, p.country].filter(Boolean).join(", ");
+  const [lng, lat] = f.geometry.coordinates;
+  return { id: `${p.osm_type}${p.osm_id}-${lat},${lng}`, main, secondary, position: { lat, lng } };
+}
+
+/** Photon (Komoot) search-as-you-type, biased towards `near` when given. */
+export async function autocomplete(input: string, near?: LatLng, signal?: AbortSignal): Promise<Suggestion[]> {
+  const q = new URLSearchParams({ q: input, limit: "6" });
+  if (near) {
+    q.set("lat", near.lat.toFixed(4));
+    q.set("lon", near.lng.toFixed(4));
+  }
+  const res = await fetch(`${PHOTON_URL}/api/?${q}`, { signal });
+  if (!res.ok) throw new Error(res.status === 429 ? "Search is busy, try again in a moment" : "Place search failed");
+  const json: { features?: PhotonFeature[] } = await res.json();
+  return (json.features ?? []).map(toSuggestion);
+}
+
+/** Best-effort short name for a clicked point. */
 export async function reverseGeocode(p: LatLng): Promise<string> {
   const fallback = `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;
   try {
-    // The geocoder can hang (e.g. key rejected), so don't wait on it forever.
-    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 8000));
-    const { results } = await Promise.race([new google.maps.Geocoder().geocode({ location: p }), timeout]);
-    const r = results[0];
-    if (!r) return fallback;
-    const part = (t: string) => r.address_components.find((c) => c.types.includes(t))?.long_name;
-    const road = part("route");
-    const town = part("locality") ?? part("postal_town") ?? part("administrative_area_level_2");
-    return [road, town].filter(Boolean).join(", ") || r.formatted_address;
+    const res = await fetch(`${PHOTON_URL}/reverse?lat=${p.lat}&lon=${p.lng}&limit=1`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    const json: { features?: PhotonFeature[] } = await res.json();
+    const f = json.features?.[0];
+    if (!f) return fallback;
+    const { street, name, city, district, county } = f.properties;
+    return [street ?? name, city ?? district ?? county].filter(Boolean).join(", ") || fallback;
   } catch {
     return fallback;
   }

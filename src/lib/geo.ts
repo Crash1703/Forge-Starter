@@ -59,9 +59,9 @@ export function turnAngle(from: number, to: number): number {
 }
 
 /**
- * Resample a path to points roughly `step` metres apart. Encoded polylines are
+ * Resample a path to points roughly `step` metres apart. Router geometry is
  * dense in bends and sparse on straights; resampling makes the curviness score
- * independent of how Google chose to encode the geometry.
+ * independent of how the router chose to encode the geometry.
  */
 export function resample(path: LatLng[], step: number): LatLng[] {
   if (path.length < 2) return path.slice();
@@ -97,9 +97,9 @@ export function curviness(path: LatLng[]): number {
   let prev = bearing(pts[0], pts[1]);
   for (let i = 2; i < pts.length; i++) {
     const cur = bearing(pts[i - 1], pts[i]);
-    const t = Math.abs(turnAngle(prev, cur));
-    // Ignore junction-style hairpins (U-turns, roundabout exits) that aren't road bends.
-    if (t < 120) total += t;
+    // Cap each turn: hairpins on mountain passes count fully, but a single
+    // U-turn at a dead end or roundabout can't dominate the score.
+    total += Math.min(Math.abs(turnAngle(prev, cur)), 120);
     prev = cur;
   }
   return total / km;

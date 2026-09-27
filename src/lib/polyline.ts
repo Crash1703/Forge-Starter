@@ -1,7 +1,8 @@
 import type { LatLng } from "./geo";
 
-/** Decode a Google encoded polyline (precision 5). */
-export function decodePolyline(encoded: string): LatLng[] {
+/** Decode an encoded polyline: precision 5 (Google) or 6 (Valhalla). */
+export function decodePolyline(encoded: string, precision = 5): LatLng[] {
+  const factor = 10 ** precision;
   const out: LatLng[] = [];
   let index = 0;
   let lat = 0;
@@ -20,7 +21,7 @@ export function decodePolyline(encoded: string): LatLng[] {
       if (which === 0) lat += delta;
       else lng += delta;
     }
-    out.push({ lat: lat / 1e5, lng: lng / 1e5 });
+    out.push({ lat: lat / factor, lng: lng / factor });
   }
   return out;
 }

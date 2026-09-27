@@ -162,6 +162,10 @@ input[type="search"], input:not([type]), .save input, .card input {
 .fit { position: absolute; right: 10px; bottom: 110px; width: 40px; height: 40px; padding: 0; background: var(--panel); box-shadow: var(--shadow); font-size: 1.1rem; }
 .toast { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 16px; border-radius: 20px; box-shadow: var(--shadow); font-size: 0.9rem; max-width: calc(100% - 32px); }
 
+.credits { padding: 8px 16px; font-size: 0.72rem; color: var(--muted); border-top: 1px solid var(--line); line-height: 1.5; }
+.credits a { color: inherit; }
+.pin { cursor: grab; }
+
 /* Phones: map on top, planner below */
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; grid-template-rows: 52vh 1fr; }

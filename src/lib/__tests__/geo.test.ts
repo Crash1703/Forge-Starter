@@ -76,9 +76,21 @@ describe("curviness", () => {
     expect(curvinessLabel(gentle)).not.toBe(curvinessLabel(twisty));
   });
 
-  it("ignores U-turns", () => {
+  it("keeps a single U-turn from dominating", () => {
     const out = destination(origin, 0, 5000);
-    expect(curviness([origin, out, origin])).toBeLessThan(1);
+    expect(curvinessLabel(curviness([origin, out, origin]))).toBe("Straight");
+  });
+
+  it("counts mountain-pass hairpins", () => {
+    // Switchbacks: 400 m straights joined by tight 180° bends.
+    const pts = [origin];
+    let heading = 0;
+    for (let i = 0; i < 12; i++) {
+      pts.push(destination(pts[pts.length - 1], heading, 400));
+      pts.push(destination(pts[pts.length - 1], (heading + 90) % 360, 20));
+      heading = (heading + 180) % 360;
+    }
+    expect(curvinessLabel(curviness(pts))).toMatch(/twisty/i);
   });
 });
 

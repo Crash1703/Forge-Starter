@@ -1,4 +1,5 @@
-import { pathLength, resample, type LatLng } from "./geo";
+import { distance, pathLength, resample, type LatLng } from "./geo";
+import { ELEVATION_URL } from "./config";
 
 export interface ElevationProfile {
   points: { position: LatLng; elevation: number; at: number }[]; // `at` = metres from start
@@ -26,16 +27,30 @@ export function climbStats(elevations: number[], threshold = 3) {
   return { ascent, descent };
 }
 
-export async function elevationProfile(path: LatLng[], totalMetres: number): Promise<ElevationProfile> {
-  // The Elevation service accepts at most 512 path vertices per request.
-  const coarse = path.length > 500 ? resample(path, pathLength(path) / 480) : path;
-  const samples = 256;
-  const { results } = await new google.maps.ElevationService().getElevationAlongPath({ path: coarse, samples });
-  const points = results.map((r, i) => ({
-    position: { lat: r.location!.lat(), lng: r.location!.lng() },
-    elevation: r.elevation,
-    at: (totalMetres * i) / (samples - 1),
-  }));
+const SAMPLES = 200;
+const PER_REQUEST = 100; // Open-Meteo's limit on coordinates per call
+
+/** Elevation profile from Open-Meteo (Copernicus 90 m terrain model). */
+export async function elevationProfile(path: LatLng[], signal?: AbortSignal): Promise<ElevationProfile> {
+  const total = pathLength(path);
+  const pts = resample(path, Math.max(total / (SAMPLES - 1), 1)).slice(0, SAMPLES);
+  const batches: LatLng[][] = [];
+  for (let i = 0; i < pts.length; i += PER_REQUEST) batches.push(pts.slice(i, i + PER_REQUEST));
+  const heights = (
+    await Promise.all(
+      batches.map(async (b) => {
+        const q = `latitude=${b.map((p) => p.lat.toFixed(5)).join(",")}&longitude=${b.map((p) => p.lng.toFixed(5)).join(",")}`;
+        const res = await fetch(`${ELEVATION_URL}?${q}`, { signal });
+        if (!res.ok) throw new Error("Elevation lookup failed");
+        return ((await res.json()) as { elevation: number[] }).elevation;
+      }),
+    )
+  ).flat();
+  let at = 0;
+  const points = pts.map((position, i) => {
+    if (i) at += distance(pts[i - 1], position);
+    return { position, elevation: heights[i] ?? 0, at };
+  });
   const elev = points.map((p) => p.elevation);
   return { points, ...climbStats(elev), min: Math.min(...elev), max: Math.max(...elev) };
 }

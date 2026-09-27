@@ -46,7 +46,7 @@ const readPts = (doc: Document, tag: string): LatLng[] =>
 
 /**
  * Parse a GPX file. Route points (or waypoints) become stops; if the file only
- * has a track, stops are sampled from it so it can be re-routed on Google roads.
+ * has a track, stops are sampled from it so it can be re-routed.
  */
 export function parseGpx(xml: string, parser: DOMParser = new DOMParser()): GpxData {
   const doc = parser.parseFromString(xml, "application/xml");

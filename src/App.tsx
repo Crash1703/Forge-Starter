@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { importLibrary, setOptions } from "@googlemaps/js-api-loader";
 import MapView from "./components/MapView";
 import MapErrorBoundary from "./components/MapErrorBoundary";
 import PlaceSearch from "./components/PlaceSearch";
 import ElevationChart from "./components/ElevationChart";
-import { getApiKey, setStoredApiKey } from "./lib/config";
 import {
   curvinessLabel,
   formatDistance,
@@ -32,81 +30,7 @@ const STYLES: { id: RouteStyle; name: string; hint: string }[] = [
   { id: "twisty", name: "Twisty", hint: "Hunts for the curviest roads" },
 ];
 
-const prefersDark = () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
-
 export default function App() {
-  const [apiKey, setApiKey] = useState(getApiKey);
-  const [mapsReady, setMapsReady] = useState(false);
-  const [loadError, setLoadError] = useState("");
-
-  useEffect(() => {
-    if (!apiKey) return;
-    // Google calls this global when it rejects the key (wrong key, API not enabled, referrer blocked).
-    (window as unknown as { gm_authFailure: () => void }).gm_authFailure = () =>
-      setLoadError("Google rejected this API key.");
-    setOptions({ key: apiKey, v: "weekly" });
-    Promise.all(["maps", "marker", "elevation", "geocoding"].map((l) => importLibrary(l as "maps")))
-      .then(() => setMapsReady(true))
-      .catch((e: Error) => setLoadError(e.message || "Could not load Google Maps"));
-  }, [apiKey]);
-
-  if (!apiKey) return <KeySetup onSave={setApiKey} />;
-  if (loadError)
-    return (
-      <div className="centered">
-        <div className="card">
-          <h1>Google Maps didn't load</h1>
-          <p>{loadError}</p>
-          <p>
-            Check that the key is correct, that billing is on for its Google Cloud project, that the Maps JavaScript
-            API is enabled, and that any HTTP referrer restriction includes this site.
-          </p>
-          <button
-            onClick={() => {
-              setStoredApiKey("");
-              location.reload();
-            }}
-          >
-            Enter a different key
-          </button>
-        </div>
-      </div>
-    );
-  if (!mapsReady) return <div className="centered muted">Loading map…</div>;
-  return <Planner apiKey={apiKey} />;
-}
-
-function KeySetup({ onSave }: { onSave: (k: string) => void }) {
-  const [key, setKey] = useState("");
-  return (
-    <div className="centered">
-      <form
-        className="card"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setStoredApiKey(key.trim());
-          onSave(key.trim());
-        }}
-      >
-        <h1>Forge Route Planner</h1>
-        <p>
-          Paste a Google Maps Platform API key to start. Enable the <b>Maps JavaScript</b>, <b>Routes</b>,{" "}
-          <b>Places (New)</b>, <b>Geocoding</b> and <b>Elevation</b> APIs for it.
-        </p>
-        <p className="muted">
-          The key is kept in this browser only. To build it in instead, set <code>VITE_GOOGLE_MAPS_API_KEY</code> in{" "}
-          <code>.env</code>.
-        </p>
-        <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="AIza…" aria-label="API key" autoFocus />
-        <button type="submit" className="primary" disabled={!key.trim()}>
-          Start planning
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function Planner({ apiKey }: { apiKey: string }) {
   const shared = useMemo(() => decodeShare(location.hash), []);
   const [stops, setStops] = useState<Stop[]>(shared?.stops ?? []);
   const [options, setOptions] = useState<RouteOptions>(shared?.options ?? defaultOptions);
@@ -124,7 +48,6 @@ function Planner({ apiKey }: { apiKey: string }) {
   const [showSteps, setShowSteps] = useState(false);
   const [toast, setToast] = useState("");
   const [center, setCenter] = useState<LatLng | undefined>();
-  const [dark] = useState(prefersDark);
   const wantFit = useRef(!!shared);
   const dragFrom = useRef<number | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -148,7 +71,7 @@ function Planner({ apiKey }: { apiKey: string }) {
     const ctrl = new AbortController();
     const t = window.setTimeout(() => {
       setBusy(true);
-      planRoute(apiKey, stops.map((s) => s.position), options, ctrl.signal)
+      planRoute(stops.map((s) => s.position), options, ctrl.signal)
         .then((r) => {
           setRoutes(r);
           setSelected(0);
@@ -169,18 +92,16 @@ function Planner({ apiKey }: { apiKey: string }) {
     };
     // stopsKey captures the positions; labels changing must not re-route.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stopsKey, options, apiKey]);
+  }, [stopsKey, options]);
 
   useEffect(() => {
     setProfile(null);
     if (!route || route.path.length < 2) return;
-    let live = true;
-    elevationProfile(route.path, route.distance)
-      .then((p) => live && setProfile(p))
-      .catch(() => live && setProfile(null));
-    return () => {
-      live = false;
-    };
+    const ctrl = new AbortController();
+    elevationProfile(route.path, ctrl.signal)
+      .then(setProfile)
+      .catch(() => !ctrl.signal.aborted && setProfile(null));
+    return () => ctrl.abort();
   }, [route]);
 
   // Keep the URL shareable as the plan changes.
@@ -311,12 +232,12 @@ function Planner({ apiKey }: { apiKey: string }) {
   async function importGpx(file: File) {
     try {
       const data = parseGpx(await file.text());
-      const imported = data.waypoints.slice(0, 27).map((p) => ({ id: newId(), position: p, label: "Locating…" }));
+      const imported = data.waypoints.slice(0, 25).map((p) => ({ id: newId(), position: p, label: "Locating…" }));
       setStops(imported);
       imported.forEach((s) => labelStop(s.id, s.position));
       setName(data.name);
       wantFit.current = true;
-      flash(data.waypoints.length > 27 ? "Imported the first 27 points (Google's limit)" : `Imported “${data.name}”`);
+      flash(data.waypoints.length > 25 ? "Imported the first 25 points (the routing limit)" : `Imported “${data.name}”`);
     } catch (e) {
       flash((e as Error).message);
     }
@@ -359,7 +280,6 @@ function Planner({ apiKey }: { apiKey: string }) {
           <div className="scroll">
             <section>
               <PlaceSearch
-                apiKey={apiKey}
                 near={stops[stops.length - 1]?.position ?? center}
                 placeholder={stops.length ? "Add a stop or destination" : "Search for a start point"}
                 onPick={(label, p) => addStop(p, label)}
@@ -612,6 +532,13 @@ function Planner({ apiKey }: { apiKey: string }) {
             )}
           </div>
         )}
+        <footer className="credits">
+          Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>{" "}
+          contributors · tiles <a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> · routing{" "}
+          <a href="https://valhalla.github.io/valhalla/" target="_blank" rel="noreferrer">Valhalla</a> (FOSSGIS) · search{" "}
+          <a href="https://photon.komoot.io" target="_blank" rel="noreferrer">Photon</a> · elevation{" "}
+          <a href="https://open-meteo.com" target="_blank" rel="noreferrer">Open-Meteo</a>
+        </footer>
       </aside>
 
       <main className="map-wrap">
@@ -622,24 +549,11 @@ function Planner({ apiKey }: { apiKey: string }) {
             selected={selected}
             hover={hover}
             fitKey={fitKey}
-            darkMode={dark}
             onMapClick={(p) => addStop(p)}
             onStopMove={moveStop}
             onRouteClick={(p, leg) => addStop(p, undefined, leg + 1)}
             onSelectRoute={setSelected}
-            onMapReady={(m) => {
-              if (!shared)
-                navigator.geolocation?.getCurrentPosition(
-                  (pos) => {
-                    const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                    setCenter(p);
-                    m.panTo(p);
-                    m.setZoom(10);
-                  },
-                  () => undefined,
-                  { timeout: 5000 },
-                );
-            }}
+            onLocate={setCenter}
           />
         </MapErrorBoundary>
         {route && (

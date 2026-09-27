@@ -1,5 +1,6 @@
 import { curviness, distance, midpointOffset, type LatLng } from "./geo";
 import { decodePolyline } from "./polyline";
+import { VALHALLA_URL } from "./config";
 
 export type RouteStyle = "fastest" | "scenic" | "twisty";
 export type Vehicle = "motorcycle" | "car";
@@ -40,131 +41,117 @@ export interface RouteResult {
   warnings: string[];
 }
 
-interface ApiRoute {
-  distanceMeters?: number;
-  duration?: string;
-  polyline?: { encodedPolyline?: string };
-  warnings?: string[];
-  legs?: {
-    distanceMeters?: number;
-    duration?: string;
-    steps?: { distanceMeters?: number; navigationInstruction?: { maneuver?: string; instructions?: string } }[];
+/** The parts of a Valhalla /route response we use. */
+export interface ValhallaTrip {
+  summary: { length: number; time: number }; // km, s
+  legs: {
+    shape: string; // polyline, precision 6
+    summary: { length: number; time: number };
+    maneuvers?: { instruction: string; length: number; type: number }[];
   }[];
 }
 
-const ENDPOINT = "https://routes.googleapis.com/directions/v2:computeRoutes";
-const FIELD_MASK = [
-  "routes.distanceMeters",
-  "routes.duration",
-  "routes.polyline.encodedPolyline",
-  "routes.warnings",
-  "routes.legs.distanceMeters",
-  "routes.legs.duration",
-  "routes.legs.steps.distanceMeters",
-  "routes.legs.steps.navigationInstruction",
-].join(",");
-const MAX_INTERMEDIATES = 25;
+interface ValhallaResponse {
+  trip?: ValhallaTrip;
+  alternates?: { trip: ValhallaTrip }[];
+  error?: string;
+  error_code?: number;
+}
 
-const waypoint = (p: LatLng, via = false) => ({
-  location: { latLng: { latitude: p.lat, longitude: p.lng } },
-  ...(via ? { via: true } : {}),
-});
-
-const seconds = (d?: string) => (d ? parseFloat(d) : 0);
+// Valhalla allows more, but the public server caps requests; stay well under.
+const MAX_STOPS = 25;
 
 export class RoutingError extends Error {}
 
 interface Waypoint {
   pos: LatLng;
+  /** Pass through without splitting the route into another leg. */
   via: boolean;
 }
 
+/**
+ * Valhalla costing for our options. `use_*` values run 0..1, where 0 means
+ * "avoid unless there's no other way".
+ */
+export function costing(opts: RouteOptions) {
+  const avoidHighways = opts.avoidHighways || opts.style !== "fastest";
+  const common = {
+    use_highways: avoidHighways ? 0 : 1,
+    use_tolls: opts.avoidTolls ? 0 : 0.5,
+    use_ferry: opts.avoidFerries ? 0 : 0.5,
+  };
+  if (opts.vehicle === "car") return { costing: "auto", costing_options: { auto: common } };
+  // Motorcycle costing favours smaller roads as use_highways drops; keep it on paved roads.
+  return { costing: "motorcycle", costing_options: { motorcycle: { ...common, use_trails: 0 } } };
+}
+
 async function computeRoutes(
-  key: string,
   points: Waypoint[],
   opts: RouteOptions,
   alternatives: boolean,
   signal?: AbortSignal,
-): Promise<ApiRoute[]> {
-  if (points.length - 2 > MAX_INTERMEDIATES) {
-    throw new RoutingError(`Google allows at most ${MAX_INTERMEDIATES} stops between start and finish.`);
-  }
-  const avoidHighways = opts.avoidHighways || opts.style !== "fastest";
+): Promise<ValhallaTrip[]> {
   const body = {
-    origin: waypoint(points[0].pos),
-    destination: waypoint(points[points.length - 1].pos),
-    intermediates: points.slice(1, -1).map((p) => waypoint(p.pos, p.via)),
-    travelMode: opts.vehicle === "motorcycle" ? "TWO_WHEELER" : "DRIVE",
-    routingPreference: "TRAFFIC_UNAWARE",
-    computeAlternativeRoutes: alternatives && points.length === 2,
-    routeModifiers: { avoidHighways, avoidTolls: opts.avoidTolls, avoidFerries: opts.avoidFerries },
-    languageCode: navigator.language || "en",
-    units: "METRIC",
+    locations: points.map((p) => ({ lat: p.pos.lat, lon: p.pos.lng, type: p.via ? "through" : "break" })),
+    ...costing(opts),
+    ...(alternatives && points.length === 2 ? { alternates: 2 } : {}),
+    directions_options: { units: "kilometers", language: navigator.language || "en-US" },
   };
-  const res = await fetch(ENDPOINT, {
-    method: "POST",
-    signal,
-    headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": FIELD_MASK },
-    body: JSON.stringify(body),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg: string = json?.error?.message ?? `Routes API returned HTTP ${res.status}`;
-    // Two-wheeler routing is only offered in some countries; retry as a car.
-    if (opts.vehicle === "motorcycle" && /TWO_WHEELER|travel mode|not supported/i.test(msg)) {
-      return computeRoutes(key, points, { ...opts, vehicle: "car" }, alternatives, signal);
-    }
-    throw new RoutingError(msg);
+  let res: Response;
+  try {
+    res = await fetch(`${VALHALLA_URL}/route`, {
+      method: "POST",
+      signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw e;
+    throw new RoutingError("Couldn't reach the routing server. Check your connection and try again.");
   }
-  const routes: ApiRoute[] = json.routes ?? [];
-  if (!routes.length) throw new RoutingError("No route found between these points.");
-  return routes;
+  const json: ValhallaResponse = await res.json().catch(() => ({}));
+  if (!res.ok || !json.trip) {
+    if (res.status === 429) throw new RoutingError("The free routing server is busy. Wait a moment and try again.");
+    throw new RoutingError(json.error ? `No route: ${json.error}` : `Routing failed (HTTP ${res.status})`);
+  }
+  return [json.trip, ...(json.alternates ?? []).map((a) => a.trip)];
 }
 
-function toResult(r: ApiRoute, label: string, detours: LatLng[]): RouteResult {
-  const path = decodePolyline(r.polyline?.encodedPolyline ?? "");
+export function toResult(trip: ValhallaTrip, label: string, detours: LatLng[]): RouteResult {
+  // Each leg's shape starts where the previous one ended; drop the repeated point.
+  const path = trip.legs.flatMap((l, i) => decodePolyline(l.shape, 6).slice(i ? 1 : 0));
   return {
     id: Math.random().toString(36).slice(2),
     label,
     path,
-    distance: r.distanceMeters ?? 0,
-    duration: seconds(r.duration),
+    distance: trip.summary.length * 1000,
+    duration: trip.summary.time,
     curviness: curviness(path),
-    legs: (r.legs ?? []).map((l) => ({ distance: l.distanceMeters ?? 0, duration: seconds(l.duration) })),
-    steps: (r.legs ?? []).flatMap((l) =>
-      (l.steps ?? [])
-        .filter((s) => s.navigationInstruction?.instructions)
-        .map((s) => ({
-          instruction: s.navigationInstruction!.instructions!,
-          maneuver: s.navigationInstruction!.maneuver ?? "",
-          distance: s.distanceMeters ?? 0,
-        })),
+    legs: trip.legs.map((l) => ({ distance: l.summary.length * 1000, duration: l.summary.time })),
+    steps: trip.legs.flatMap((l) =>
+      (l.maneuvers ?? []).map((m) => ({ instruction: m.instruction, maneuver: String(m.type), distance: m.length * 1000 })),
     ),
     detours,
-    warnings: r.warnings ?? [],
+    warnings: [],
   };
 }
 
 /**
  * Plan a route through `stops`.
  *
- * Google has no "curvy roads" option, so for the twisty style we ask for
- * several candidate routes (Google's alternatives plus variants pushed off to
- * either side of the longest leg by an extra via point), score each by how
- * much the road bends per km, and rank the curviest first. Candidates that
- * take far longer than the quickest one are dropped.
+ * For the twisty style we ask for several candidate routes (the router's
+ * alternatives plus variants pushed off to either side of the longest leg by
+ * an extra pass-through point), score each by how much the road bends per km,
+ * and rank the curviest first. Candidates that take far longer than the
+ * quickest one are dropped.
  */
-export async function planRoute(
-  key: string,
-  stops: LatLng[],
-  opts: RouteOptions,
-  signal?: AbortSignal,
-): Promise<RouteResult[]> {
+export async function planRoute(stops: LatLng[], opts: RouteOptions, signal?: AbortSignal): Promise<RouteResult[]> {
+  if (stops.length > MAX_STOPS) throw new RoutingError(`A route can have at most ${MAX_STOPS} stops.`);
   const base: Waypoint[] = stops.map((pos) => ({ pos, via: false }));
-  const baseRoutes = await computeRoutes(key, base, opts, true, signal);
+  const baseRoutes = await computeRoutes(base, opts, true, signal);
   const results = baseRoutes.map((r, i) => toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, []));
 
-  if (opts.style === "twisty" && stops.length - 2 < MAX_INTERMEDIATES) {
+  if (opts.style === "twisty" && stops.length < MAX_STOPS) {
     // Longest straight-line leg is where a detour has the most room to find better roads.
     let leg = 0;
     for (let i = 1; i < stops.length - 1; i++) {
@@ -174,13 +161,18 @@ export async function planRoute(
     const b = stops[leg + 1];
     if (distance(a, b) > 5000) {
       const variants = [0.2, -0.2, 0.35, -0.35].map((f) => midpointOffset(a, b, f));
-      const settled = await Promise.allSettled(
-        variants.map((detour) => {
-          const pts = [...base.slice(0, leg + 1), { pos: detour, via: true }, ...base.slice(leg + 1)];
-          return computeRoutes(key, pts, opts, false, signal).then((r) => toResult(r[0], "Detour", [detour]));
-        }),
-      );
-      for (const s of settled) if (s.status === "fulfilled") results.push(s.value);
+      // Sequential, not parallel: the public server rate-limits bursts.
+      for (const detour of variants) {
+        if (signal?.aborted) break;
+        const pts = [...base.slice(0, leg + 1), { pos: detour, via: true }, ...base.slice(leg + 1)];
+        try {
+          const [r] = await computeRoutes(pts, opts, false, signal);
+          results.push(toResult(r, "Detour", [detour]));
+        } catch (e) {
+          if ((e as Error).name === "AbortError") throw e;
+          // A detour point in a lake or on a mountain top just has no route; skip it.
+        }
+      }
     }
   }
 
