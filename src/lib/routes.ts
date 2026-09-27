@@ -27,7 +27,20 @@ export const defaultOptions: RouteOptions = {
 export interface Step {
   instruction: string;
   maneuver: string;
+  /** Length of road from this manoeuvre to the next, in metres. */
   distance: number;
+  /** Valhalla manoeuvre type (turn left, roundabout, arrive…); see maneuverKind(). */
+  type: number;
+  /** Index into the route's path where this manoeuvre happens. */
+  at: number;
+  /** Road you're turning onto, if it has a name. */
+  street?: string;
+  /** Short spoken form for the warning ahead, e.g. "Turn left onto Main Road." */
+  alert?: string;
+  /** Spoken form for the moment itself. */
+  verbal?: string;
+  /** Roundabout exit number. */
+  exit?: number;
 }
 
 export interface RouteResult {
@@ -50,8 +63,22 @@ export interface ValhallaTrip {
   legs: {
     shape: string; // polyline, precision 6
     summary: { length: number; time: number };
-    maneuvers?: { instruction: string; length: number; type: number }[];
+    maneuvers?: ValhallaManeuver[];
   }[];
+}
+
+/** Step type for reaching one of the rider's stops mid-route (not a Valhalla type). */
+export const STOP_TYPE = 99;
+
+interface ValhallaManeuver {
+  instruction: string;
+  length: number; // km
+  type: number;
+  begin_shape_index?: number;
+  street_names?: string[];
+  verbal_transition_alert_instruction?: string;
+  verbal_pre_transition_instruction?: string;
+  roundabout_exit_count?: number;
 }
 
 interface ValhallaResponse {
@@ -94,6 +121,8 @@ export interface RoutePoint {
    * or dead end under it.
    */
   radius?: number;
+  /** Direction of travel here (degrees), so the router doesn't start you off with a U-turn. */
+  heading?: number;
 }
 
 /** Twisty's helper points only pull the route sideways; any road nearby will do. */
@@ -136,6 +165,7 @@ async function computeRoutes(
       lon: p.pos.lng,
       type: locationType(p),
       ...(p.radius ? { radius: Math.round(p.radius) } : {}),
+      ...(p.heading != null ? { heading: Math.round(p.heading), heading_tolerance: 60 } : {}),
     })),
     ...costing(opts),
     ...(alternatives && points.length === 2 ? { alternates: 2 } : {}),
@@ -165,7 +195,10 @@ async function computeRoutes(
 
 export function toResult(trip: ValhallaTrip, label: string, detours: LatLng[]): RouteResult {
   // Each leg's shape starts where the previous one ended; drop the repeated point.
-  const path = trip.legs.flatMap((l, i) => decodePolyline(l.shape, 6).slice(i ? 1 : 0));
+  const legPaths = trip.legs.map((l) => decodePolyline(l.shape, 6));
+  const path = legPaths.flatMap((p, i) => p.slice(i ? 1 : 0));
+  // Where each leg starts in the joined path, for placing its manoeuvres.
+  const offsets = legPaths.map((_, i) => legPaths.slice(0, i).reduce((n, p) => n + p.length - 1, 0));
   return {
     id: Math.random().toString(36).slice(2),
     label,
@@ -174,8 +207,35 @@ export function toResult(trip: ValhallaTrip, label: string, detours: LatLng[]): 
     duration: trip.summary.time,
     curviness: curviness(path),
     legs: trip.legs.map((l) => ({ distance: l.summary.length * 1000, duration: l.summary.time })),
-    steps: trip.legs.flatMap((l) =>
-      (l.maneuvers ?? []).map((m) => ({ instruction: m.instruction, maneuver: String(m.type), distance: m.length * 1000 })),
+    steps: trip.legs.flatMap((l, li) =>
+      (l.maneuvers ?? []).flatMap((m, mi, all): Step[] => {
+        // Between legs the router says "you have arrived" then "head north";
+        // mid-route those are just the stop, so keep only the final arrival.
+        const last = li === trip.legs.length - 1 && mi === all.length - 1;
+        if (li > 0 && mi === 0 && m.type >= 1 && m.type <= 3) return [];
+        const stop = !last && m.type >= 4 && m.type <= 6 ? li + 1 : 0;
+        return [
+          {
+            ...(stop
+              ? {
+                  instruction: `Stop ${stop}`,
+                  alert: `Stop ${stop} ahead.`,
+                  verbal: `You've reached stop ${stop}.`,
+                }
+              : {
+                  instruction: m.instruction,
+                  alert: m.verbal_transition_alert_instruction,
+                  verbal: m.verbal_pre_transition_instruction,
+                }),
+            maneuver: String(m.type),
+            distance: m.length * 1000,
+            type: stop ? STOP_TYPE : m.type,
+            at: Math.min(path.length - 1, offsets[li] + (m.begin_shape_index ?? 0)),
+            street: m.street_names?.[0],
+            exit: m.roundabout_exit_count,
+          },
+        ];
+      }),
     ),
     detours,
     warnings: [],
@@ -339,4 +399,58 @@ export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal
     ...r,
     label: i === 0 ? (opts.style === "twisty" ? "Twistiest" : opts.style === "fastest" ? "Fastest" : "Recommended") : `Option ${i + 1}`,
   }));
+}
+
+/**
+ * A way from where the rider is back onto their planned route, starting in
+ * the direction they're already heading.
+ */
+export async function routeBack(
+  from: LatLng,
+  heading: number | null,
+  to: LatLng,
+  opts: RouteOptions,
+  signal?: AbortSignal,
+): Promise<RouteResult> {
+  const points: Waypoint[] = [
+    { pos: from, via: false, ...(heading != null ? { heading } : {}) },
+    { pos: to, via: false },
+  ];
+  const [trip] = await computeRoutes(points, { ...opts, returnToStart: false }, false, signal);
+  return toResult(trip, "Back to route", []);
+}
+
+/**
+ * Speed limits along a route, in km/h per path point (null where the map
+ * has none), from Valhalla's trace_attributes on the route's own geometry.
+ */
+export async function speedLimits(path: LatLng[], opts: RouteOptions, signal?: AbortSignal): Promise<(number | null)[]> {
+  // Thin long routes: the public server caps trace sizes, and map matching
+  // doesn't need every vertex. `k` maps sampled indices back to the path.
+  const k = Math.max(1, Math.ceil(path.length / 1500));
+  const shape = path.filter((_, i) => i % k === 0 || i === path.length - 1);
+  const res = await fetch(`${VALHALLA_URL}/trace_attributes`, {
+    method: "POST",
+    signal,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      shape: shape.map((p) => ({ lat: p.lat, lon: p.lng })),
+      costing: costing(opts).costing,
+      shape_match: "map_snap",
+      filters: { attributes: ["edge.speed_limit", "edge.begin_shape_index", "edge.end_shape_index"], action: "include" },
+    }),
+  });
+  if (!res.ok) throw new RoutingError(`Speed limits unavailable (HTTP ${res.status})`);
+  const json: { edges?: { speed_limit?: number | string; begin_shape_index?: number; end_shape_index?: number }[] } =
+    await res.json();
+  const limits: (number | null)[] = path.map(() => null);
+  for (const e of json.edges ?? []) {
+    // Valhalla reports 0 or "unlimited"/missing where the limit isn't known or doesn't apply.
+    const limit = typeof e.speed_limit === "number" && e.speed_limit > 0 ? e.speed_limit : null;
+    if (limit == null || e.begin_shape_index == null || e.end_shape_index == null) continue;
+    const from = e.begin_shape_index * k;
+    const to = Math.min(path.length - 1, e.end_shape_index * k + k - 1);
+    for (let i = from; i <= to; i++) limits[i] = limit;
+  }
+  return limits;
 }

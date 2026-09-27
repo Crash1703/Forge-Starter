@@ -1,0 +1,238 @@
+import { useEffect, useRef, useState } from "react";
+import ManeuverIcon from "./ManeuverIcon";
+import type { RideLayer } from "./MapView";
+import { formatDistance, formatDuration, type LatLng } from "../lib/geo";
+import { Announcer, maneuverKind, Navigator, spliceRejoin, type Fix, type NavRoute, type NavState } from "../lib/navigation";
+import { routeBack, speedLimits, type RouteOptions, type RouteResult } from "../lib/routes";
+import { keepScreenOn, simulateRide, speak, watchPosition, type Stop } from "../lib/device";
+
+interface Props {
+  route: RouteResult;
+  options: RouteOptions;
+  loop: boolean;
+  /** Preview: ride the route at 4× speed without moving. */
+  simulate: boolean;
+  /** Bumped when the rider drags the map, which pauses following. */
+  followBreaks: number;
+  onLayer: (layer: RideLayer | null) => void;
+  onExit: () => void;
+}
+
+const MUTE_KEY = "forge.muted";
+/** Don't ask the router for a way back more often than this. */
+const REROUTE_GAP_MS = 15_000;
+
+/**
+ * Ride mode: turn-by-turn along the planned route. Big type, voice prompts,
+ * speed and limit, time to go. Leave the route and it finds a way back onto
+ * it ahead, instead of re-planning the whole ride.
+ */
+export default function RideView({ route, options, loop, simulate, followBreaks, onLayer, onExit }: Props) {
+  const plan: NavRoute = { path: route.path, steps: route.steps, distance: route.distance, duration: route.duration };
+  const active = useRef<NavRoute>(plan);
+  const nav = useRef(new Navigator(plan));
+  const talk = useRef(new Announcer(loop));
+  const limits = useRef<(number | null)[]>([]);
+  const lastReroute = useRef(0);
+  const [state, setState] = useState<NavState | null>(null);
+  const [fix, setFix] = useState<Fix | null>(null);
+  const [rerouting, setRerouting] = useState(false);
+  const [gpsNote, setGpsNote] = useState("Finding your position…");
+  const [follow, setFollow] = useState(true);
+  const [muted, setMuted] = useState(() => {
+    try {
+      return localStorage.getItem(MUTE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
+
+  // Dragging the map pauses following until "Re-centre".
+  const firstBreak = useRef(followBreaks);
+  useEffect(() => {
+    if (followBreaks !== firstBreak.current) setFollow(false);
+  }, [followBreaks]);
+
+  const say = (text: string) => {
+    if (!mutedRef.current) void speak(text).catch(() => undefined);
+  };
+
+  const loadLimits = (r: NavRoute) => {
+    limits.current = [];
+    speedLimits(r.path, options)
+      .then((l) => {
+        if (active.current === r) limits.current = l;
+      })
+      .catch(() => undefined); // no limits shown where the map has none or the server is busy
+  };
+
+  useEffect(() => {
+    loadLimits(active.current);
+    let stopGps: Stop = () => undefined;
+    let letSleep: Stop = () => undefined;
+    let cancelled = false;
+
+    const onFix = (f: Fix) => {
+      if (cancelled) return;
+      setGpsNote("");
+      setFix(f);
+      const n = nav.current;
+      const s = n.update(f);
+      setState(s);
+      const line = talk.current.next(s, active.current, (i) => {
+        const steps = active.current.steps;
+        return i > 0 ? n.cum[steps[i].at] - n.cum[steps[i - 1].at] : Infinity;
+      });
+      if (line) say(line);
+      if (!s.onRoute && !s.arrived) void findWayBack(f, s);
+    };
+
+    const findWayBack = async (f: Fix, s: NavState) => {
+      const now = Date.now();
+      if (now - lastReroute.current < REROUTE_GAP_MS) return;
+      lastReroute.current = now;
+      setRerouting(true);
+      const n = nav.current;
+      // Never on the route yet (started away from it): join it near you, not at the start.
+      const target = n.started ? n.rejoinIndex(800) : n.indexAt(n.cum[n.closestIndex(f.position)] + 300);
+      try {
+        const back = await routeBack(f.position, s.heading, active.current.path[target], options);
+        if (cancelled) return;
+        const joined = spliceRejoin(active.current, n, target, {
+          path: back.path,
+          steps: back.steps,
+          distance: back.distance,
+          duration: back.duration,
+        });
+        active.current = joined;
+        nav.current = new Navigator(joined);
+        talk.current = new Announcer(loop, true);
+        loadLimits(joined);
+        say("Found a way back to your route.");
+        setState(nav.current.update(f));
+      } catch {
+        // Try again after the gap; meanwhile keep showing where the route is.
+      } finally {
+        if (!cancelled) setRerouting(false);
+      }
+    };
+
+    (async () => {
+      letSleep = await keepScreenOn().catch(() => () => undefined);
+      stopGps = simulate
+        ? simulateRide(route.path, onFix)
+        : await watchPosition(onFix, (m) => !cancelled && setGpsNote(m));
+    })();
+
+    return () => {
+      cancelled = true;
+      stopGps();
+      letSleep();
+      onLayer(null);
+    };
+    // One ride per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Tell the map what to draw: the road ahead and where you are.
+  useEffect(() => {
+    const n = nav.current;
+    const path = active.current.path;
+    const from = state ? n.indexAt(state.along) : 0;
+    const ahead: LatLng[] = state ? [state.snapped, ...path.slice(from)] : path;
+    onLayer({ ahead, position: state?.snapped ?? fix?.position ?? null, heading: state?.heading ?? null, follow });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, follow]);
+
+  const steps = active.current.steps;
+  const next = state ? steps[state.step] : steps[0];
+  const after = state ? steps[state.step + 1] : undefined;
+  const n = nav.current;
+  const showThen = next && after && n.cum[after.at] - n.cum[next.at] < 400;
+  const speedKmh = state?.speed != null ? Math.round(state.speed * 3.6) : null;
+  const limit = state ? (limits.current[n.indexAt(state.along)] ?? null) : null;
+  const over = limit != null && speedKmh != null && speedKmh > limit + 3;
+  const eta = state ? new Date(Date.now() + state.remainingTime * 1000) : null;
+
+  return (
+    <div className="ride" role="region" aria-label="Ride mode">
+      <div className="ride-top">
+        {state?.arrived ? (
+          <div className="ride-next">
+            <ManeuverIcon kind="arrive" />
+            <div>
+              <strong>{loop ? "Back home" : "Arrived"}</strong>
+              <span>{formatDistance(route.distance)} ridden</span>
+            </div>
+          </div>
+        ) : next ? (
+          <div className="ride-next">
+            <ManeuverIcon kind={maneuverKind(next.type)} />
+            <div>
+              <strong>{state ? formatDistance(state.toNext) : "–"}</strong>
+              <span>{next.street ? `${next.exit ? `Exit ${next.exit} · ` : ""}${next.street}` : next.instruction}</span>
+            </div>
+          </div>
+        ) : null}
+        {showThen && !state?.arrived && (
+          <div className="ride-then">
+            Then <ManeuverIcon kind={maneuverKind(after.type)} size={24} />
+          </div>
+        )}
+        {(state && !state.onRoute) || rerouting ? (
+          <p className="ride-banner" role="status">
+            Off route: finding the way back to your route…
+          </p>
+        ) : gpsNote ? (
+          <p className="ride-banner" role="status">
+            {gpsNote}
+          </p>
+        ) : null}
+        {simulate && <p className="ride-preview">Preview ride · 4× speed</p>}
+      </div>
+
+      {!follow && (
+        <button className="ride-recentre" onClick={() => setFollow(true)}>
+          ◎ Re-centre
+        </button>
+      )}
+
+      <div className="ride-bottom">
+        <div className={`ride-speed${over ? " over" : ""}`} aria-label={speedKmh != null ? `${speedKmh} km/h` : "Speed unknown"}>
+          <strong>{speedKmh ?? "–"}</strong>
+          <small>km/h</small>
+        </div>
+        {limit != null && (
+          <div className="ride-limit" aria-label={`Speed limit ${limit}`}>
+            {limit}
+          </div>
+        )}
+        <div className="ride-eta">
+          <strong>{eta ? eta.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "–"}</strong>
+          <span>{state ? `${formatDistance(state.remaining)} · ${formatDuration(state.remainingTime)}` : "starting…"}</span>
+        </div>
+        <button
+          className="ride-round"
+          aria-label={muted ? "Turn voice on" : "Mute voice"}
+          aria-pressed={muted}
+          onClick={() => {
+            const m = !muted;
+            setMuted(m);
+            try {
+              localStorage.setItem(MUTE_KEY, m ? "1" : "0");
+            } catch {
+              /* remembered for this ride only */
+            }
+          }}
+        >
+          {muted ? "🔇" : "🔊"}
+        </button>
+        <button className="ride-end" onClick={onExit}>
+          End
+        </button>
+      </div>
+    </div>
+  );
+}

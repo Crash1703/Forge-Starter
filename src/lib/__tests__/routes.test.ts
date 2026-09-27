@@ -274,3 +274,39 @@ describe("loops come home a different way", () => {
     expect(bodies.some((b) => b.exclude_locations)).toBe(false);
   });
 });
+
+describe("ride helpers", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("maps speed limits back onto every point of a thinned route", async () => {
+    const path = Array.from({ length: 3001 }, (_, i) => ({ lat: -26.6, lng: 152.9 + i * 0.0001 }));
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string);
+      expect(body.shape.length).toBeLessThanOrEqual(1501);
+      const half = Math.floor(body.shape.length / 2);
+      const edges = [
+        { speed_limit: 60, begin_shape_index: 0, end_shape_index: half },
+        { speed_limit: 0, begin_shape_index: half, end_shape_index: body.shape.length - 1 },
+      ];
+      return new Response(JSON.stringify({ edges }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { speedLimits } = await import("../routes");
+    const limits = await speedLimits(path, defaultOptions);
+    expect(limits.length).toBe(3001);
+    expect(limits[0]).toBe(60);
+    expect(limits[1400]).toBe(60);
+    expect(limits[3000]).toBeNull();
+  });
+
+  it("asks for a way back that starts in the rider's direction", async () => {
+    const trip = { summary: { length: 1, time: 60 }, legs: [{ shape: "", summary: { length: 1, time: 60 } }] };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ trip }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { routeBack } = await import("../routes");
+    await routeBack({ lat: -26.6, lng: 152.9 }, 271.6, { lat: -26.61, lng: 152.91 }, { ...defaultOptions, returnToStart: true });
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.locations[0]).toMatchObject({ heading: 272, heading_tolerance: 60 });
+    expect(body.locations[1].heading).toBeUndefined();
+  });
+});

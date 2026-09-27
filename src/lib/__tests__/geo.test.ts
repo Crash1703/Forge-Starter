@@ -10,6 +10,11 @@ import {
   midpointOffset,
   outAndBack,
   sharedRoad,
+  countBends,
+  twistSections,
+  twistScore,
+  sunElevation,
+  isDaylight,
   avoidPoints,
   pathLength,
   resample,
@@ -190,5 +195,45 @@ describe("sharedRoad and avoidPoints", () => {
     // Evenly spread: first and last points near each end of the allowed stretch.
     expect(distance(pts[0], home)).toBeLessThan(2500);
     expect(distance(pts[49], town)).toBeLessThan(2500);
+  });
+});
+
+describe("bends and sections", () => {
+  it("counts each bend of a winding road, and none on a straight", () => {
+    expect(countBends([origin, destination(origin, 30, 10000)])).toBe(0);
+    // 8 alternating 60° bends, 300 m apart.
+    const pts = [origin];
+    let heading = 0;
+    for (let i = 0; i < 8; i++) {
+      for (let k = 0; k < 6; k++) pts.push(destination(pts[pts.length - 1], heading, 50));
+      heading = (heading + (i % 2 ? -60 : 60) + 360) % 360;
+    }
+    for (let k = 0; k < 6; k++) pts.push(destination(pts[pts.length - 1], heading, 50));
+    expect(countBends(pts)).toBe(8);
+  });
+
+  it("scores twistiness from 0 to 10", () => {
+    expect(twistScore(0)).toBe(0);
+    expect(twistScore(100)).toBe(5);
+    expect(twistScore(500)).toBe(10);
+  });
+
+  it("tags straight and twisty stretches differently and covers the whole route", () => {
+    const straight = [origin, destination(origin, 90, 3000)];
+    const wiggle = zigzag(60, 150, 3).map((p) => destination(p, 90, 3000));
+    const sections = twistSections([...straight, ...wiggle]);
+    expect(sections[0].level).toBe(0);
+    expect(sections[sections.length - 1].level).toBeGreaterThanOrEqual(2);
+    const covered = sections.reduce((s, x) => s + pathLength(x.path), 0);
+    expect(covered).toBeGreaterThan(5500);
+  });
+});
+
+describe("sun", () => {
+  const brisbane = { lat: -27.47, lng: 153.03 };
+  it("is up at noon and down at midnight in Brisbane (UTC+10)", () => {
+    expect(sunElevation(brisbane, new Date("2026-09-27T02:00:00Z"))).toBeGreaterThan(50);
+    expect(isDaylight(brisbane, new Date("2026-09-27T14:00:00Z"))).toBe(false);
+    expect(isDaylight(brisbane, new Date("2026-09-27T02:00:00Z"))).toBe(true);
   });
 });
