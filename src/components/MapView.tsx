@@ -71,6 +71,8 @@ interface Props {
   home?: LatLng | null;
   onMapClick: (p: LatLng) => void;
   onStopMove: (id: string, p: LatLng) => void;
+  /** A long press (or right-click) on the map: place a pin exactly there. */
+  onMapHold?: (p: LatLng) => void;
   /** A stop's pin was tapped (not dragged). */
   onStopClick?: (id: string) => void;
   onRouteClick: (p: LatLng, legIndex: number) => void;
@@ -209,8 +211,45 @@ export default function MapView(props: Props) {
       add({ id: "hover", type: "circle", source: "hover", paint: { ...dot, "circle-radius": 7 } });
     });
 
+    // Hold a finger on the map (or right-click) to place a pin exactly
+    // there. Browsers don't all report a long press the same way, so time
+    // it here too; `held` stops one press counting twice, or as a tap.
+    let holdTimer = 0;
+    let held = 0;
+    let holdFrom: { x: number; y: number } | null = null;
+    const cancelHold = () => {
+      window.clearTimeout(holdTimer);
+      holdTimer = 0;
+    };
+    const hold = (p: { lat: number; lng: number }) => {
+      if (cb.current.ride || Date.now() - held < 1000) return;
+      held = Date.now();
+      navigator.vibrate?.(30);
+      cb.current.onMapHold?.({ lat: p.lat, lng: p.lng });
+    };
+    m.on("touchstart", (e) => {
+      cancelHold();
+      if (e.points.length !== 1) return;
+      holdFrom = e.point;
+      const at = e.lngLat;
+      holdTimer = window.setTimeout(() => {
+        holdTimer = 0;
+        hold(at);
+      }, 550);
+    });
+    m.on("touchmove", (e) => {
+      if (holdTimer && holdFrom && Math.hypot(e.point.x - holdFrom.x, e.point.y - holdFrom.y) > 10) cancelHold();
+    });
+    m.on("touchend", cancelHold);
+    m.on("touchcancel", cancelHold);
+    m.on("zoomstart", cancelHold);
+    m.on("contextmenu", (e) => {
+      cancelHold();
+      hold(e.lngLat);
+    });
+
     m.on("click", (e) => {
-      if (cb.current.ride) return;
+      if (cb.current.ride || Date.now() - held < 800) return;
       const box: [[number, number], [number, number]] = [
         [e.point.x - 8, e.point.y - 8],
         [e.point.x + 8, e.point.y + 8],

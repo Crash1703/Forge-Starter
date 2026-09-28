@@ -72,6 +72,12 @@ describe("toResult", () => {
     expect(r.duration).toBe(900);
     expect(r.legs).toEqual([{ distance: 5000, duration: 400 }, { distance: 7500, duration: 500 }]);
     expect(r.steps.map((s) => s.instruction)).toEqual(["Drive north on B171.", "You have arrived."]);
+    // Where the route meets each stop: the start of each leg, then the finish.
+    expect(r.stopsAt).toEqual([
+      { lat: 47.1, lng: 11.1 },
+      { lat: 47.2, lng: 11.2 },
+      { lat: 47.3, lng: 11.3 },
+    ]);
   });
 });
 
@@ -416,6 +422,7 @@ describe("per-section ride styles", () => {
       ["Arrive.", 2],
     ]);
     expect(r.legs).toHaveLength(2);
+    expect(r.stopsAt).toHaveLength(3);
   });
 });
 

@@ -98,6 +98,13 @@ function rememberRoutes(key: string, routes: RouteResult[]) {
   if (plannedRoutes.size > KEEP_ROUTES) plannedRoutes.delete(plannedRoutes.keys().next().value!);
 }
 
+/** Everything about the stops that changes the route (not their names). */
+function keyOfStops(stops: Stop[]): string {
+  return stops
+    .map((s) => `${s.position.lat},${s.position.lng}${s.auto ? "*" : ""}${s.legStyle ?? ""}${(s.shape ?? []).map((p) => `/${p.lat},${p.lng}`).join("")}`)
+    .join("|");
+}
+
 function ridePath(stops: Stop[], returnToStart: boolean): Stop[] {
   return returnToStart && stops.length > 1 ? [...stops, stops[0]] : stops;
 }
@@ -352,9 +359,9 @@ export default function App() {
   );
 
   // Recompute whenever the stops or options change (debounced so dragging feels calm).
-  const stopsKey = stops
-    .map((s) => `${s.position.lat},${s.position.lng}${s.auto ? "*" : ""}${s.legStyle ?? ""}${(s.shape ?? []).map((p) => `/${p.lat},${p.lng}`).join("")}`)
-    .join("|");
+  const stopsKey = keyOfStops(stops);
+  /** Stops that moved onto the road their route already uses: no need to plan again. */
+  const alreadyPlanned = useRef<string | null>(null);
   useEffect(() => {
     if (stops.length < 2) {
       setRoutes([]);
@@ -364,6 +371,11 @@ export default function App() {
     }
     // A pin is on its way onto the road: plan once it's there.
     if (snapping > 0) return;
+    if (alreadyPlanned.current === stopsKey) {
+      alreadyPlanned.current = null;
+      return;
+    }
+    alreadyPlanned.current = null;
     const ctrl = new AbortController();
     let replanning = false;
     /** Show newly planned routes. */
@@ -432,6 +444,18 @@ export default function App() {
           }
           rememberRoutes(key, r);
           show(r);
+          // Pins the app placed (loops, round trips) go where the route
+          // actually meets the road, so none sits in a paddock or the water.
+          // The route already runs there, so nothing needs planning again.
+          const at = r[0]?.stopsAt;
+          if (at && at.length >= stops.length) {
+            const moved = stops.map((s, i) => (s.auto && !s.free && distance(s.position, at[i]) > 25 ? { ...s, position: at[i] } : s));
+            if (moved.some((s, i) => s !== stops[i])) {
+              alreadyPlanned.current = keyOfStops(moved);
+              setStops(moved);
+              moved.forEach((s, i) => s !== stops[i] && labelStop(s.id, s.position));
+            }
+          }
         })
         .catch((e: Error) => {
           if (e.name !== "AbortError") setError(e.message);
@@ -481,7 +505,7 @@ export default function App() {
     storeSettings(s);
   }
 
-  function addStop(position: LatLng, label?: string, at?: number) {
+  function addStop(position: LatLng, label?: string, at?: number, free = false) {
     const id = newId();
     // "Set via points intelligently": fit it in where it adds the least riding.
     if (at === undefined && settings.smartVias && stops.length >= 2) {
@@ -491,14 +515,15 @@ export default function App() {
         options.returnToStart,
       );
     }
-    const stop = { id, position, label: label ?? "Locating…" };
+    const stop: Stop = { id, position, label: label ?? "Locating…", ...(free ? { free: true } : {}) };
     setStops((ss) => {
       const next = ss.slice();
       next.splice(at ?? ss.length, 0, stop);
       return next;
     });
     // A spot tapped on the map goes onto the nearest road (a searched place stays where it is).
-    if (!label) placeOnRoad(id, position, true);
+    if (!label && free) labelStop(id, position);
+    else if (!label) placeOnRoad(id, position, true);
     if (at === undefined && stops.length <= 1) wantFit.current = true;
   }
 
@@ -520,9 +545,13 @@ export default function App() {
 
   function moveStop(id: string, position: LatLng) {
     // A name the rider gave stays; otherwise name the new spot.
-    const named = stops.find((s) => s.id === id)?.named;
+    const stop = stops.find((s) => s.id === id);
+    const named = stop?.named;
     setStops((ss) => ss.map((s) => (s.id === id ? { ...s, position, auto: false, ...(named ? {} : { label: "Locating…" }) } : s)));
-    placeOnRoad(id, position, !named);
+    // A pin placed by holding stays exactly where it's dropped.
+    if (stop?.free) {
+      if (!named) labelStop(id, position);
+    } else placeOnRoad(id, position, !named);
   }
 
   function reorder(from: number, to: number) {
@@ -1086,7 +1115,7 @@ export default function App() {
                   </button>
                 )}
               </div>
-              <p className="hint">Or tap the map to add stops. Tap the route line to add a stop there, and drag pins to adjust.</p>
+              <p className="hint">Or tap the map to add stops (they land on the nearest road), or hold to place one exactly. Tap the route line to add a stop there, and drag pins to adjust.</p>
 
               <StopList
                 stops={stops}
@@ -1465,6 +1494,11 @@ export default function App() {
               // With a pin's card open, a tap on the map just closes it.
               if (stopCardId) setStopCardId(null);
               else addStop(p);
+            }}
+            onMapHold={(p) => {
+              if (stopCardId) setStopCardId(null);
+              addStop(p, undefined, undefined, true);
+              flash("Pin placed exactly where you held");
             }}
             onStopClick={(id) => {
               setSight(null);

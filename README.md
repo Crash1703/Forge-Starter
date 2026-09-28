@@ -2,7 +2,7 @@
 
 A motorcycle-focused route planner in the spirit of Calimoto, built entirely on free OpenStreetMap services. No API keys, no account and no card.
 
-- **Plan routes**: search for places or tap the map to add stops. A pin you tap onto the map or drag lands on the nearest road (within 1 km), like Calimoto's. Drag pins to move them, tap the route line to insert a stop, and drag the list (or use ↑/↓) to reorder. Tap a pin for its card: rename it (a name you give stays when you drag the pin), choose the ride style to it, see how far it is from you and from the start, and make it the destination, a round-trip start or home, move it earlier or later, or delete it.
+- **Plan routes**: search for places or tap the map to add stops. A pin you tap onto the map or drag lands on the nearest road (within 1 km), like Calimoto's; hold your finger on the map (or right-click) to place one exactly where you want, off-road or not, and it stays put when dragged. Pins the app places for loops and round trips move onto the road the route uses. Drag pins to move them, tap the route line to insert a stop, and drag the list (or use ↑/↓) to reorder. Tap a pin for its card: rename it (a name you give stays when you drag the pin), choose the ride style to it, see how far it is from you and from the start, and make it the destination, a round-trip start or home, move it earlier or later, or delete it.
 - **Ride styles**: *Fastest* (motorways allowed), *Scenic* (no motorways) or *Twisty*, which looks for the curviest roads.
 - **Motorcycle routing**: uses Valhalla's motorcycle profile, which prefers smaller roads as motorways are avoided and stays on paved roads.
 - **Avoid** motorways, tolls and ferries.

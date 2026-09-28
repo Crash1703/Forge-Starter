@@ -17,6 +17,8 @@ export interface Stop {
   shape?: LatLng[];
   /** The rider named this stop: moving its pin keeps the name. */
   named?: boolean;
+  /** Placed by holding on the map: stays exactly there, not snapped to a road. */
+  free?: boolean;
 }
 
 /**

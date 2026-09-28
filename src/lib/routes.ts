@@ -60,6 +60,11 @@ export interface RouteResult {
    * at the foot of that dead end: move the stop there and re-plan.
    */
   moves?: { stop: number; to: LatLng }[];
+  /**
+   * Where the route actually meets each stop (the road the router snapped
+   * it to): the start of each leg, then the finish.
+   */
+  stopsAt?: LatLng[];
 }
 
 /** The parts of a Valhalla /route response we use. */
@@ -227,10 +232,12 @@ export function toResult(trip: ValhallaTrip, label: string, detours: LatLng[]): 
   const path = legPaths.flatMap((p, i) => p.slice(i ? 1 : 0));
   // Where each leg starts in the joined path, for placing its manoeuvres.
   const offsets = legPaths.map((_, i) => legPaths.slice(0, i).reduce((n, p) => n + p.length - 1, 0));
+  const stopsAt = legPaths.length ? [...legPaths.map((p) => p[0]), legPaths[legPaths.length - 1][legPaths[legPaths.length - 1].length - 1]] : [];
   return {
     id: Math.random().toString(36).slice(2),
     label,
     path,
+    stopsAt,
     distance: trip.summary.length * 1000,
     duration: trip.summary.time,
     curviness: curviness(path),
@@ -738,5 +745,7 @@ export function joinSections(sections: RouteResult[]): RouteResult {
     steps,
     detours: sections.flatMap((r) => r.detours),
     warnings: [...new Set(sections.flatMap((r) => r.warnings))],
+    // Each section ends where the next starts.
+    stopsAt: sections.flatMap((r, i) => (i ? (r.stopsAt ?? []).slice(1) : (r.stopsAt ?? []))),
   };
 }
