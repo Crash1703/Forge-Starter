@@ -126,3 +126,19 @@ export async function keepScreenOn(): Promise<Stop> {
     void lock?.release();
   };
 }
+
+/**
+ * Android 13+ hides the "navigating" notification (the one that keeps GPS
+ * running with the screen locked) until the app may post notifications.
+ * Ask once, when the first ride starts; riding works either way.
+ */
+export async function askToShowRideNotification(): Promise<void> {
+  if (!isApp) return;
+  try {
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    const { display } = await LocalNotifications.checkPermissions();
+    if (display === "prompt" || display === "prompt-with-rationale") await LocalNotifications.requestPermissions();
+  } catch {
+    /* older Android: nothing to ask */
+  }
+}

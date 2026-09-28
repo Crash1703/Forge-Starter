@@ -14,6 +14,8 @@ import {
   formatDistance,
   formatDuration,
   isDaylight,
+  LOOP_KMH,
+  loopThrough,
   roundTripWaypoints,
   twistScore,
   type LatLng,
@@ -42,6 +44,19 @@ const STYLES: { id: RouteStyle; name: string; hint: string }[] = [
 
 /** Short commit ID of this build, shown in the footer so riders can tell whether a refresh picked up an update. */
 const BUILD = (import.meta.env.VITE_BUILD_ID as string | undefined)?.slice(0, 7) || "dev";
+
+/** Compass rose for round trips: 8 directions around "any direction". */
+const COMPASS: { label: string; name: string; deg: number | null }[] = [
+  { label: "NW", name: "North-west", deg: 315 },
+  { label: "N", name: "North", deg: 0 },
+  { label: "NE", name: "North-east", deg: 45 },
+  { label: "W", name: "West", deg: 270 },
+  { label: "Any", name: "Any direction", deg: null },
+  { label: "E", name: "East", deg: 90 },
+  { label: "SW", name: "South-west", deg: 225 },
+  { label: "S", name: "South", deg: 180 },
+  { label: "SE", name: "South-east", deg: 135 },
+];
 
 type MapTheme = "auto" | "light" | "dark";
 const THEME_KEY = "forge.mapTheme";
@@ -74,6 +89,12 @@ export default function App() {
   const [saved, setSaved] = useState<SavedRoute[]>(loadSaved);
   const [name, setName] = useState("");
   const [loopKm, setLoopKm] = useState(120);
+  const [loopMode, setLoopMode] = useState<"distance" | "time">("distance");
+  const [loopMin, setLoopMin] = useState(120);
+  const [loopDir, setLoopDir] = useState<number | null>(null); // compass degrees, null = any
+  const [loopVia, setLoopVia] = useState<{ label: string; position: LatLng } | null>(null);
+  // A time-based loop is checked once against its planned riding time, and resized if well off.
+  const loopFit = useRef<{ targetSec: number; km: number } | null>(null);
   const [showSteps, setShowSteps] = useState(false);
   const [toast, setToast] = useState("");
   const [center, setCenter] = useState<LatLng | undefined>();
@@ -92,6 +113,19 @@ export default function App() {
 
   const route = routes[selected];
   const bends = useMemo(() => (route ? countBends(route.path) : 0), [route]);
+
+  useEffect(() => {
+    const fit = loopFit.current;
+    if (!fit || !route || busy) return;
+    loopFit.current = null;
+    const ratio = fit.targetSec / Math.max(60, route.duration);
+    if (ratio < 0.8 || ratio > 1.2) {
+      makeLoop(Math.min(800, Math.max(10, fit.km * ratio)));
+      flash(`Resizing the loop to about ${formatDuration(fit.targetSec)}`);
+    }
+    // Runs when a freshly planned route arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route, busy]);
 
   // Auto map theme: dark from dusk to dawn where the map is (checked every 5 minutes).
   useEffect(() => {
@@ -239,18 +273,36 @@ export default function App() {
     setStops((ss) => ss.filter((s) => s.id !== id));
   }
 
-  function makeLoop(start?: Stop) {
-    const origin = start ?? stops[0];
+  function makeLoop(km?: number) {
+    const origin = stops[0];
     if (!origin) {
       flash("Set a start point first");
       return;
     }
-    const heading = Math.random() * 360;
-    const pts = roundTripWaypoints(origin.position, loopKm * 1000, heading);
-    const via = pts.map((p) => ({ id: newId(), position: p, label: "Locating…", auto: true }));
+    const length = km ?? (loopMode === "distance" ? loopKm : (loopMin / 60) * LOOP_KMH[options.style]);
+    let via: Stop[];
+    if (loopVia) {
+      const side = Math.random() < 0.5 ? 1 : -1; // a different way round each time
+      const { waypoints, viaIndex } = loopThrough(origin.position, loopVia.position, length * 1000, side);
+      via = waypoints.map((p, i) =>
+        i === viaIndex
+          ? { id: newId(), position: p, label: loopVia.label }
+          : { id: newId(), position: p, label: "Locating…", auto: true },
+      );
+    } else {
+      // A chosen direction still varies a little, so "another loop" differs.
+      const heading = loopDir == null ? Math.random() * 360 : (loopDir + Math.random() * 40 - 20 + 360) % 360;
+      via = roundTripWaypoints(origin.position, length * 1000, heading).map((p) => ({
+        id: newId(),
+        position: p,
+        label: "Locating…",
+        auto: true,
+      }));
+    }
     setStops([{ ...origin, auto: false }, ...via]);
     setOptions((o) => ({ ...o, returnToStart: true }));
-    via.forEach((v) => labelStop(v.id, v.position));
+    via.filter((v) => v.auto).forEach((v) => labelStop(v.id, v.position));
+    loopFit.current = loopMode === "time" && km === undefined ? { targetSec: loopMin * 60, km: length } : null;
     wantFit.current = true;
   }
 
@@ -572,17 +624,72 @@ export default function App() {
 
             <section>
               <h2>Round trip</h2>
+              <div className="segmented two" role="radiogroup" aria-label="Plan the loop by">
+                {(["distance", "time"] as const).map((m) => (
+                  <button key={m} role="radio" aria-checked={loopMode === m} onClick={() => setLoopMode(m)}>
+                    {m === "distance" ? "Distance" : "Riding time"}
+                  </button>
+                ))}
+              </div>
               <div className="loop">
-                <input
-                  type="range"
-                  min={20}
-                  max={500}
-                  step={10}
-                  value={loopKm}
-                  onChange={(e) => setLoopKm(+e.target.value)}
-                  aria-label="Round trip length"
-                />
-                <output>{loopKm} km</output>
+                {loopMode === "distance" ? (
+                  <input
+                    id="loop-km"
+                    type="range"
+                    min={20}
+                    max={500}
+                    step={10}
+                    value={loopKm}
+                    onChange={(e) => setLoopKm(+e.target.value)}
+                    aria-label="Round trip length"
+                  />
+                ) : (
+                  <input
+                    id="loop-min"
+                    type="range"
+                    min={30}
+                    max={480}
+                    step={15}
+                    value={loopMin}
+                    onChange={(e) => setLoopMin(+e.target.value)}
+                    aria-label="Round trip riding time"
+                  />
+                )}
+                <output>{loopMode === "distance" ? `${loopKm} km` : formatDuration(loopMin * 60)}</output>
+              </div>
+              <div className="loop-options">
+                <div className={`compass${loopVia ? " disabled" : ""}`} role="radiogroup" aria-label="Head out towards">
+                  {COMPASS.map((c) => (
+                    <button
+                      key={c.label}
+                      role="radio"
+                      aria-checked={loopDir === c.deg}
+                      aria-label={c.name}
+                      title={c.name}
+                      disabled={!!loopVia}
+                      onClick={() => setLoopDir(c.deg)}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="loop-via">
+                  <small>{loopVia ? "Riding via" : "Head out towards a direction, or ride via a place:"}</small>
+                  {loopVia ? (
+                    <span className="chip">
+                      {loopVia.label}
+                      <button aria-label={`Don't ride via ${loopVia.label}`} onClick={() => setLoopVia(null)}>
+                        ✕
+                      </button>
+                    </span>
+                  ) : (
+                    <PlaceSearch
+                      near={stops[0]?.position ?? center}
+                      placeholder="Via a place (optional)"
+                      onPick={(label, p) => setLoopVia({ label, position: p })}
+                    />
+                  )}
+                </div>
               </div>
               <button className="wide" onClick={() => makeLoop()} disabled={!stops.length}>
                 ↻ {options.returnToStart && stops.some((s) => s.auto) ? "Try another loop" : "Make a loop from A"}

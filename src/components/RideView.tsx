@@ -4,7 +4,7 @@ import type { RideLayer } from "./MapView";
 import { formatDistance, formatDuration, type LatLng } from "../lib/geo";
 import { Announcer, maneuverKind, Navigator, spliceRejoin, type Fix, type NavRoute, type NavState } from "../lib/navigation";
 import { routeBack, speedLimits, type RouteOptions, type RouteResult } from "../lib/routes";
-import { keepScreenOn, simulateRide, speak, watchPosition, type Stop } from "../lib/device";
+import { askToShowRideNotification, keepScreenOn, simulateRide, speak, watchPosition, type Stop } from "../lib/device";
 
 interface Props {
   route: RouteResult;
@@ -120,6 +120,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
     };
 
     (async () => {
+      if (!simulate) await askToShowRideNotification();
       letSleep = await keepScreenOn().catch(() => () => undefined);
       stopGps = simulate
         ? simulateRide(route.path, onFix)
