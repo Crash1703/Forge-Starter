@@ -1,4 +1,4 @@
-import { avoidPoints, curviness, distance, midpointOffset, findSpurs, outAndBack, sharedRoad, type LatLng } from "./geo";
+import { avoidPoints, crossings, curviness, distance, findSpurs, midpointOffset, outAndBack, sharedRoad, type LatLng } from "./geo";
 import { decodePolyline } from "./polyline";
 import { VALHALLA_URL } from "./config";
 
@@ -322,6 +322,66 @@ async function untangleLoop(
   return { summary: { length: sum((l) => l.summary.length), time: sum((l) => l.summary.time) }, legs };
 }
 
+/**
+ * A loop's legs shouldn't cross each other (a figure of eight, or riding
+ * back across the way out). For each leg that crosses another, try the
+ * router's other ways between its ends, and the same leg told to stay off
+ * the road at the crossing, and keep whichever crosses least, as long as it
+ * isn't much slower.
+ */
+async function uncrossLoop(
+  trip: ValhallaTrip,
+  waypoints: Waypoint[],
+  opts: RouteOptions,
+  signal?: AbortSignal,
+): Promise<ValhallaTrip> {
+  const breaks = waypoints.flatMap((w, i) => (w.via ? [] : [i]));
+  if (trip.legs.length !== breaks.length - 1 || trip.legs.length < 2) return trip;
+  const legs = trip.legs.slice();
+  const paths = legs.map((l) => decodePolyline(l.shape, 6));
+  const stops = breaks.map((i) => waypoints[i].pos);
+  const hitsOf = (path: LatLng[], k: number) => [
+    ...crossings(path, null, stops),
+    ...paths.flatMap((other, j) => (j === k ? [] : crossings(path, other, stops))),
+  ];
+  let changed = false;
+  // Worst leg first; a fixed leg may fix the one it crossed too.
+  const order = paths.map((p, k) => ({ k, n: hitsOf(p, k).length })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n);
+  for (const { k } of order) {
+    const hits = hitsOf(paths[k], k);
+    if (!hits.length) continue;
+    const ends = [waypoints[breaks[k]], waypoints[breaks[k + 1]]].map((w) => ({ ...w, via: false, noUturn: false }));
+    const shaped = waypoints.slice(breaks[k], breaks[k + 1] + 1).map((w, i, all) => (i === 0 || i === all.length - 1 ? { ...w, noUturn: false } : w));
+    const candidates: ValhallaTrip[] = [];
+    for (const attempt of [
+      () => computeRoutes(ends, opts, true, signal),
+      () => computeRoutes(shaped, opts, false, signal, hits),
+    ]) {
+      try {
+        candidates.push(...(await attempt()));
+      } catch (e) {
+        if ((e as Error).name === "AbortError") throw e;
+        // No other way from there: try the next idea.
+      }
+    }
+    let best = { n: hits.length, leg: legs[k], path: paths[k] };
+    for (const c of candidates) {
+      if (c.legs.length !== 1 || c.summary.time > legs[k].summary.time * 1.5 + 300) continue;
+      const path = decodePolyline(c.legs[0].shape, 6);
+      const n = hitsOf(path, k).length;
+      if (n < best.n) best = { n, leg: c.legs[0], path };
+    }
+    if (best.leg !== legs[k]) {
+      legs[k] = best.leg;
+      paths[k] = best.path;
+      changed = true;
+    }
+  }
+  if (!changed) return trip;
+  const sum = (f: (l: ValhallaTrip["legs"][number]) => number) => legs.reduce((a, l) => a + f(l), 0);
+  return { summary: { length: sum((l) => l.summary.length), time: sum((l) => l.summary.time) }, legs };
+}
+
 /** Where the route actually reached stop `n` (its road, which may be some way from the pin). */
 function reachedStop(r: RouteResult, n: number): LatLng | null {
   const step = r.steps.find((st) => st.type === STOP_TYPE && st.instruction === `Stop ${n}`);
@@ -362,7 +422,7 @@ export async function planRoute(
     turnsAround = true;
   }
   const loop = opts.returnToStart
-    ? (trip: ValhallaTrip, pts: Waypoint[]) => untangleLoop(trip, pts, opts, signal)
+    ? async (trip: ValhallaTrip, pts: Waypoint[]) => uncrossLoop(await untangleLoop(trip, pts, opts, signal), pts, opts, signal)
     : async (trip: ValhallaTrip) => trip;
   baseRoutes = [await loop(baseRoutes[0], base), ...baseRoutes.slice(1)];
 
@@ -453,8 +513,13 @@ export async function planRoute(
       r.duration <= quickest * 1.6 &&
       !results.slice(0, i).some((o) => Math.abs(o.distance - r.distance) < r.distance * 0.01),
   );
-  if (opts.style === "twisty") unique.sort((x, y) => y.curviness - x.curviness);
-  else if (opts.style === "fastest") unique.sort((x, y) => x.duration - y.duration);
+  // A loop that crosses over itself rides a figure of eight; rank clean loops first.
+  const stopPositions = points.map((p) => p.pos);
+  const crossed = new Map(unique.map((r) => [r, opts.returnToStart ? crossings(r.path, null, stopPositions).length : 0]));
+  const byCrossings = (x: RouteResult, y: RouteResult) => crossed.get(x)! - crossed.get(y)!;
+  if (opts.style === "twisty") unique.sort((x, y) => byCrossings(x, y) || y.curviness - x.curviness);
+  else if (opts.style === "fastest") unique.sort((x, y) => byCrossings(x, y) || x.duration - y.duration);
+  else unique.sort(byCrossings);
 
   return unique.map((r, i) => ({
     ...r,
