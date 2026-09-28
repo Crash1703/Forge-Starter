@@ -6,6 +6,7 @@ import type { FeatureCollection } from "geojson";
 import { distance, pathLength, twistSections, type LatLng } from "../lib/geo";
 import type { RouteResult } from "../lib/routes";
 import type { Stop } from "../lib/storage";
+import type { Poi } from "../lib/pois";
 import { MAP_STYLE, MAP_STYLE_DARK } from "../lib/config";
 
 // MapLibre looks for its worker next to its own script, which bundling moves;
@@ -43,6 +44,8 @@ interface Props {
   track?: LatLng[] | null;
   /** Faint lines of every recorded ride ("ghost lines"). */
   history?: LatLng[][];
+  /** Fuel stations and cafés along the route. */
+  pois?: Poi[];
   onMapClick: (p: LatLng) => void;
   onStopMove: (id: string, p: LatLng) => void;
   onRouteClick: (p: LatLng, legIndex: number) => void;
@@ -99,6 +102,7 @@ export default function MapView(props: Props) {
   const map = useRef<MapLibre | null>(null);
   const markers = useRef(new globalThis.Map<string, { marker: Marker; el: HTMLDivElement }>());
   const puck = useRef<{ marker: Marker; el: HTMLDivElement } | null>(null);
+  const poiMarkers = useRef<Marker[]>([]);
   // Latest data for each source, so it can be re-applied after a style switch.
   const data = useRef<Record<string, Geo>>({ history: EMPTY, track: EMPTY, alts: EMPTY, route: EMPTY, dots: EMPTY, hover: EMPTY, ride: EMPTY });
   // Handlers change every render; listeners read the latest through this ref.
@@ -276,6 +280,20 @@ export default function MapView(props: Props) {
     setData("history", { type: "FeatureCollection", features: (props.history ?? []).filter((h) => h.length > 1).map((h) => line(h)) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.history]);
+
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    poiMarkers.current.forEach((mk) => mk.remove());
+    poiMarkers.current = (props.ride ? [] : (props.pois ?? [])).map((p) => {
+      const el = document.createElement("div");
+      el.className = `poi poi-${p.kind}`;
+      el.textContent = p.kind === "fuel" ? "⛽" : "☕";
+      el.title = p.name;
+      return new Marker({ element: el }).setLngLat([p.position.lng, p.position.lat]).addTo(m);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.pois, !!props.ride]);
 
   // Ride mode: the road ahead in blue on top.
   useEffect(() => {

@@ -50,3 +50,15 @@ describe("loops", () => {
     expect(plan.options.returnToStart).toBe(false);
   });
 });
+
+describe("section styles in share links", () => {
+  it("round-trips a section's own style and leaves others alone", () => {
+    const stops = [
+      { id: "1", label: "Home", position: { lat: -26.65, lng: 153.05 }, legStyle: "fastest" as const },
+      { id: "2", label: "Maleny", position: { lat: -26.76, lng: 152.85 }, legStyle: "twisty" as const },
+      { id: "3", label: "Kenilworth", position: { lat: -26.6, lng: 152.73 } },
+    ];
+    const back = decodeShare(encodeShare(stops, defaultOptions))!;
+    expect(back.stops.map((s) => s.legStyle)).toEqual(["fastest", "twisty", undefined]);
+  });
+});

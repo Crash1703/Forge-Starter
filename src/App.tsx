@@ -5,8 +5,11 @@ import BottomSheet, { type Snap } from "./components/BottomSheet";
 import TwistGauge from "./components/TwistGauge";
 import RideView from "./components/RideView";
 import RidesPanel from "./components/RidesPanel";
+import WeatherStrip from "./components/WeatherStrip";
+import StopsAlong from "./components/StopsAlong";
+import type { Poi } from "./lib/pois";
 import { useRecording } from "./lib/useRecording";
-import { deleteRide, listRides } from "./lib/rideStore";
+import { deleteRide, listRides, putRide } from "./lib/rideStore";
 import { trackPath, type RideRecord } from "./lib/recorder";
 import type { RideLayer } from "./components/MapView";
 import MapErrorBoundary from "./components/MapErrorBoundary";
@@ -24,7 +27,7 @@ import {
   twistScore,
   type LatLng,
 } from "./lib/geo";
-import { defaultOptions, planRoute, type RouteOptions, type RouteResult, type RouteStyle } from "./lib/routes";
+import { defaultOptions, planRoute, planSections, type RouteOptions, type RouteResult, type RouteStyle } from "./lib/routes";
 import { elevationProfile, type ElevationProfile } from "./lib/elevation";
 import { reverseGeocode } from "./lib/places";
 import { parseGpx, sampleStops, toGpx } from "./lib/gpx";
@@ -100,6 +103,8 @@ export default function App() {
     }
   });
   const [confirmStop, setConfirmStop] = useState(false);
+  const [pois, setPois] = useState<Poi[]>([]);
+  const backupInput = useRef<HTMLInputElement>(null);
   const autoRecord = useRef(false);
   const [saved, setSaved] = useState<SavedRoute[]>(loadSaved);
   const [name, setName] = useState("");
@@ -223,7 +228,7 @@ export default function App() {
   );
 
   // Recompute whenever the stops or options change (debounced so dragging feels calm).
-  const stopsKey = stops.map((s) => `${s.position.lat},${s.position.lng}${s.auto ? "*" : ""}`).join("|");
+  const stopsKey = stops.map((s) => `${s.position.lat},${s.position.lng}${s.auto ? "*" : ""}${s.legStyle ?? ""}`).join("|");
   useEffect(() => {
     if (stops.length < 2) {
       setRoutes([]);
@@ -247,7 +252,9 @@ export default function App() {
           radius: between ? (s.auto ? 1000 : 75) : undefined,
         };
       });
-      planRoute(points, options, ctrl.signal)
+      // Sections with their own style are planned one at a time and joined.
+      const styles = ride.slice(0, -1).map((s) => s.legStyle);
+      (styles.some(Boolean) ? planSections(points, styles, options, ctrl.signal) : planRoute(points, options, ctrl.signal))
         .then((r) => {
           setRoutes(r);
           setSnap((s) => (s === "peek" ? "half" : s));
@@ -404,6 +411,33 @@ export default function App() {
       toGpx({ name: ride.name, waypoints: [track[0], track[track.length - 1]], track }),
       "application/gpx+xml",
     ).catch(() => undefined);
+  }
+
+  function backUp() {
+    const data = { app: "ride-forge", version: 1, savedAt: Date.now(), routes: saved, rides };
+    const day = new Date().toISOString().slice(0, 10);
+    saveFile(`ride-forge-backup-${day}.json`, JSON.stringify(data), "application/json")
+      .then(() => flash(`Backed up ${saved.length} routes and ${rides.length} rides`))
+      .catch(() => undefined);
+  }
+
+  async function restore(file: File) {
+    try {
+      const data = JSON.parse(await file.text());
+      if (data?.app !== "ride-forge") throw new Error("That isn't a Ride Forge backup file");
+      const routes: SavedRoute[] = Array.isArray(data.routes) ? data.routes : [];
+      const newRoutes = routes.filter((r) => r?.id && !saved.some((x) => x.id === r.id));
+      const merged = [...newRoutes, ...saved].sort((a, b) => b.savedAt - a.savedAt);
+      setSaved(merged);
+      storeSaved(merged);
+      const incoming: RideRecord[] = Array.isArray(data.rides) ? data.rides : [];
+      const newRides = incoming.filter((r) => r?.id && Array.isArray(r.points) && !rides.some((x) => x.id === r.id));
+      for (const r of newRides) await putRide(r);
+      refreshRides();
+      flash(`Restored ${newRoutes.length} routes and ${newRides.length} rides`);
+    } catch (e) {
+      flash((e as Error).message || "Couldn't read that backup");
+    }
   }
 
   function removeRide(ride: RideRecord) {
@@ -624,6 +658,25 @@ export default function App() {
                       <span className="label" title={s.label}>
                         {s.label}
                       </span>
+                      {(i < stops.length - 1 || (options.returnToStart && stops.length > 1)) && (
+                        <select
+                          className="leg-style"
+                          aria-label={`Ride style from ${s.label} to the next stop`}
+                          value={s.legStyle ?? ""}
+                          onChange={(e) =>
+                            setStops((ss) =>
+                              ss.map((x) => (x.id === s.id ? { ...x, legStyle: (e.target.value || undefined) as RouteStyle | undefined } : x)),
+                            )
+                          }
+                        >
+                          <option value="">↓ {STYLES.find((x) => x.id === options.style)?.name}</option>
+                          {STYLES.map((x) => (
+                            <option key={x.id} value={x.id}>
+                              ↓ {x.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       <span className="row-actions">
                         <button aria-label="Move up" disabled={i === 0} onClick={() => reorder(i, i - 1)}>
                           ↑
@@ -852,6 +905,12 @@ export default function App() {
                       </p>
                     ))}
                     {profile && <ElevationChart profile={profile} onHover={setHover} />}
+                    <WeatherStrip route={route} onHover={setHover} />
+                    <StopsAlong
+                      route={route}
+                      onPois={setPois}
+                      onFocus={(p) => mapRef.current?.easeTo({ center: [p.lng, p.lat], zoom: Math.max(mapRef.current.getZoom(), 14) })}
+                    />
 
                     <div className="save">
                       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name this route" aria-label="Route name" />
@@ -924,6 +983,22 @@ export default function App() {
               <button className="wide" onClick={() => fileInput.current?.click()}>
                 ⤒ Import GPX
               </button>
+              <div className="button-row">
+                <button onClick={backUp}>Back up routes &amp; rides</button>
+                <button onClick={() => backupInput.current?.click()}>Restore a backup</button>
+              </div>
+              <p className="hint">A backup file moves your saved routes and rides between the website and the app, or to a new phone.</p>
+              <input
+                ref={backupInput}
+                type="file"
+                accept=".json,application/json"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void restore(f);
+                  e.target.value = "";
+                }}
+              />
               <input
                 ref={fileInput}
                 type="file"
@@ -985,6 +1060,7 @@ export default function App() {
             insetTop={riding ? 220 : 0}
             me={me}
             track={selectedTrack}
+            pois={tab === "plan" ? pois : []}
             history={histories}
             ride={riding ? (rideLayer ?? { ahead: route?.path ?? [], position: null, heading: null, follow: true }) : null}
             onFollowBroken={() => setFollowBreaks((n) => n + 1)}

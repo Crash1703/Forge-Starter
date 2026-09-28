@@ -212,6 +212,37 @@ input[type="search"], input:not([type]), .save input, .card input {
 .fab { width: 52px; height: 52px; border-radius: 50%; padding: 0; display: grid; place-items: center; align-content: center; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); font-size: 1.3rem; line-height: 1; }
 .fab small { font-size: 0.6rem; color: var(--muted); margin-top: 2px; }
 
+/* Per-section ride style, under a stop */
+.stops li { flex-wrap: wrap; }
+.leg-style { order: 3; flex-basis: 100%; margin-left: 34px; width: auto; max-width: calc(100% - 34px); font-size: 0.8rem; color: var(--muted); background: none; border: none; padding: 2px 0; }
+.leg-style:focus-visible { outline: 2px solid var(--accent); }
+
+/* Weather on the way */
+.weather-head, .along-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.weather-head h2 { margin: 0; }
+.weather-head select { font-size: 0.85rem; background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
+.weather-strip { list-style: none; margin: 8px 0 0; padding: 0 0 4px; display: flex; gap: 6px; overflow-x: auto; scroll-snap-type: x proximity; }
+.weather-strip li { flex: none; scroll-snap-align: start; display: grid; justify-items: center; gap: 1px; min-width: 62px; padding: 6px 4px; border-radius: 10px; background: var(--field); font-variant-numeric: tabular-nums; }
+.weather-strip li.wet { background: color-mix(in srgb, #2f7bff 18%, var(--field)); }
+.weather-strip small { font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
+.w-icon { font-size: 1.3rem; line-height: 1.2; }
+
+/* Fuel & cafés along the route */
+.along-head { margin-bottom: 8px; }
+.segmented.three { grid-template-columns: repeat(3, auto); }
+.segmented.three button { padding: 6px 10px; }
+.range { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--muted); }
+.range input { width: 64px; background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
+.along-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 260px; overflow-y: auto; }
+.along-list button { width: 100%; display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; align-items: center; text-align: left; background: none; border: none; padding: 6px 4px; }
+.along-list button:hover { background: var(--field); }
+.along-list strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.along-list small { color: var(--muted); font-variant-numeric: tabular-nums; }
+.poi { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: #fff; border: 2px solid #333; font-size: 0.9rem; box-shadow: 0 1px 4px rgb(0 0 0 / 0.3); }
+.poi-fuel { border-color: #0b6e4f; }
+.poi-cafe { border-color: #8a4b1a; }
+.result > .weather, .result > .along { border-top: 1px solid var(--line); padding-top: 12px; }
+
 /* Ride recording */
 .fab.rec span { color: #d8262b; font-size: 1.6rem; }
 .fab.rec.on { background: #d8262b; border-color: #d8262b; animation: rec-pulse 1.6s ease-in-out infinite; }

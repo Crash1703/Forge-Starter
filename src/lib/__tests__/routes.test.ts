@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { destination } from "../geo";
-import { costing, defaultOptions, planRoute, spurWarning, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
+import { costing, defaultOptions, planRoute, planSections, spurWarning, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
 
 /** Encode points as a precision-6 polyline, the format Valhalla returns. */
 function encode6(pts: [number, number][]): string {
@@ -308,5 +308,50 @@ describe("ride helpers", () => {
     const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     expect(body.locations[0]).toMatchObject({ heading: 272, heading_tolerance: 60 });
     expect(body.locations[1].heading).toBeUndefined();
+  });
+});
+
+describe("per-section ride styles", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("plans each section with its own style and joins them into one route", async () => {
+    const a = { lat: -26.6, lng: 152.9 };
+    const b = destination(a, 90, 20000);
+    const c = destination(b, 180, 20000);
+    const bodies: { locations: { lat: number; lon: number }[]; costing_options: { motorcycle: { use_highways: number } } }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        bodies.push(body);
+        const [from, to] = [body.locations[0], body.locations[body.locations.length - 1]];
+        const trip = {
+          summary: { length: 20, time: 1200 },
+          legs: [
+            {
+              shape: encode6([[from.lat, from.lon], [to.lat, to.lon]]),
+              summary: { length: 20, time: 1200 },
+              maneuvers: [
+                { type: 1, instruction: "Head off.", length: 20, begin_shape_index: 0 },
+                { type: 4, instruction: "Arrive.", length: 0, begin_shape_index: 1 },
+              ],
+            },
+          ],
+        };
+        return new Response(JSON.stringify({ trip }), { status: 200 });
+      }),
+    );
+    const [r] = await planSections([{ pos: a }, { pos: b }, { pos: c }], ["fastest", "scenic"], defaultOptions);
+    const sectionRequests = bodies.filter((x) => x.locations.length === 2);
+    expect(sectionRequests[0].costing_options.motorcycle.use_highways).toBe(1);
+    expect(sectionRequests[sectionRequests.length - 1].costing_options.motorcycle.use_highways).toBe(0);
+    expect(r.path).toHaveLength(3);
+    expect(r.distance).toBe(40000);
+    expect(r.steps.map((s) => [s.instruction, s.at])).toEqual([
+      ["Head off.", 0],
+      ["Stop 1", 1],
+      ["Arrive.", 2],
+    ]);
+    expect(r.legs).toHaveLength(2);
   });
 });
