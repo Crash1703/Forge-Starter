@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import ManeuverIcon from "./ManeuverIcon";
 import RideAddStop, { type AddMode } from "./RideAddStop";
+import type { Poi } from "../lib/pois";
 import type { RideLayer } from "./MapView";
 import { distance, formatDistance, formatDuration, formatTime, speedUnit, toSpeed, type LatLng } from "../lib/geo";
 import { Announcer, maneuverKind, Navigator, spliceRejoin, type Fix, type NavRoute, type NavState } from "../lib/navigation";
@@ -17,6 +18,8 @@ interface Props {
   /** Bumped when the rider drags the map, which pauses following. */
   followBreaks: number;
   onLayer: (layer: RideLayer | null) => void;
+  /** Fuel and cafés found in the planner, offered first when adding a stop. */
+  knownPlaces?: Poi[];
   /** Let the screen sleep while navigating (voice still guides). */
   energySaving?: boolean;
   /** The rider paused (or resumed) the ride: hold recording too. */
@@ -33,7 +36,7 @@ const REROUTE_GAP_MS = 15_000;
  * speed and limit, time to go. Leave the route and it finds a way back onto
  * it ahead, instead of re-planning the whole ride.
  */
-export default function RideView({ route, options, loop, simulate, followBreaks, onLayer, onPause, onExit, energySaving }: Props) {
+export default function RideView({ route, options, loop, simulate, followBreaks, onLayer, onPause, onExit, energySaving, knownPlaces }: Props) {
   const plan: NavRoute = { path: route.path, steps: route.steps, distance: route.distance, duration: route.duration };
   const active = useRef<NavRoute>(plan);
   const nav = useRef(new Navigator(plan));
@@ -307,6 +310,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
           from={state?.snapped ?? fix?.position ?? route.path[0]}
           ahead={state ? active.current.path.slice(n.indexAt(state.along)) : active.current.path}
           onAdd={addStop}
+          known={knownPlaces}
           onClose={() => setAdding(false)}
         />
       )}

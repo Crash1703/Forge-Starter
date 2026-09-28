@@ -776,6 +776,7 @@ export default function App() {
           onLayer={setRideLayer}
           onPause={(on) => recording.pause(on)}
           energySaving={settings.energySaving}
+          knownPlaces={pois}
           onExit={() => {
             setRiding(null);
             setRideLayer(null);
