@@ -87,6 +87,15 @@ const loadTheme = (): MapTheme => {
 };
 
 /** The stops in riding order, including the ride back to the start on a loop. */
+/** Routes planned this visit, by stops and options, newest last. */
+const plannedRoutes = new Map<string, RouteResult[]>();
+const KEEP_ROUTES = 30;
+function rememberRoutes(key: string, routes: RouteResult[]) {
+  plannedRoutes.delete(key);
+  plannedRoutes.set(key, routes);
+  if (plannedRoutes.size > KEEP_ROUTES) plannedRoutes.delete(plannedRoutes.keys().next().value!);
+}
+
 function ridePath(stops: Stop[], returnToStart: boolean): Stop[] {
   return returnToStart && stops.length > 1 ? [...stops, stops[0]] : stops;
 }
@@ -98,6 +107,9 @@ export default function App() {
   const [routes, setRoutes] = useState<RouteResult[]>([]);
   const [selected, setSelected] = useState(0);
   const [busy, setBusy] = useState(false);
+  /** A first route is showing; a better one (loop clean-up, twistier detours) is on its way. */
+  const [refining, setRefining] = useState(false);
+  const planCtrl = useRef<AbortController | null>(null);
   const [error, setError] = useState("");
   const [profile, setProfile] = useState<ElevationProfile | null>(null);
   const [hover, setHover] = useState<LatLng | null>(null);
@@ -162,7 +174,7 @@ export default function App() {
 
   useEffect(() => {
     const fit = loopFit.current;
-    if (!fit || !route || busy) return;
+    if (!fit || !route || busy || refining) return;
     loopFit.current = null;
     const ratio = fit.targetSec / Math.max(60, route.duration);
     // Close enough is fine: only resize when well off, and keep the same
@@ -173,7 +185,7 @@ export default function App() {
     }
     // Runs when a freshly planned route arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route, busy]);
+  }, [route, busy, refining]);
 
   // Sights for the part of the map in view, re-checked as the map moves.
   useEffect(() => {
@@ -334,6 +346,7 @@ export default function App() {
     .map((s) => `${s.position.lat},${s.position.lng}${s.auto ? "*" : ""}${s.legStyle ?? ""}${(s.shape ?? []).map((p) => `/${p.lat},${p.lng}`).join("")}`)
     .join("|");
   useEffect(() => {
+    setRefining(false);
     if (stops.length < 2) {
       setRoutes([]);
       setProfile(null);
@@ -341,9 +354,20 @@ export default function App() {
       return;
     }
     const ctrl = new AbortController();
+    planCtrl.current = ctrl;
     let replanning = false;
+    /** Show routes: a first rough answer, or the finished one. */
+    const show = (r: RouteResult[]) => {
+      setRoutes(r);
+      setSnap((s) => (s === "peek" ? "half" : s));
+      setSelected(0);
+      setError("");
+      if (wantFit.current) {
+        wantFit.current = false;
+        setFitKey((k) => k + 1);
+      }
+    };
     const t = window.setTimeout(() => {
-      setBusy(true);
       const ride = ridePath(stops, options.returnToStart);
       const plan = routePoints(stops, options.returnToStart);
       // No turning back at stops on a loop (or at generated loop points), so
@@ -363,7 +387,23 @@ export default function App() {
       });
       // Sections with their own style are planned one at a time and joined.
       const styles = ride.slice(0, -1).map((s) => s.legStyle);
-      (styles.some(Boolean) ? planSections(points, styles, options, ctrl.signal) : planRoute(points, options, ctrl.signal))
+      // The same stops and options as a moment ago (say, back to Twisty after
+      // a look at Fastest): no need to ask the router again.
+      const key = JSON.stringify([points, styles, options]);
+      const known = plannedRoutes.get(key);
+      if (known) {
+        show(known);
+        setBusy(false);
+        return;
+      }
+      setBusy(true);
+      const first = (r: RouteResult[]) => {
+        if (ctrl.signal.aborted || !r.length) return;
+        show(r);
+        setBusy(false);
+        setRefining(true);
+      };
+      (styles.some(Boolean) ? planSections(points, styles, options, ctrl.signal) : planRoute(points, options, ctrl.signal, [], first))
         .then((r) => {
           // A generated loop point the route has to ride up a dead end to
           // reach: move it to the foot of that road and plan again. Moved
@@ -386,19 +426,17 @@ export default function App() {
             replanning = true;
             return;
           }
-          setRoutes(r);
-          setSnap((s) => (s === "peek" ? "half" : s));
-          setSelected(0);
-          setError("");
-          if (wantFit.current) {
-            wantFit.current = false;
-            setFitKey((k) => k + 1);
-          }
+          rememberRoutes(key, r);
+          show(r);
         })
         .catch((e: Error) => {
           if (e.name !== "AbortError") setError(e.message);
         })
-        .finally(() => !ctrl.signal.aborted && !replanning && setBusy(false));
+        .finally(() => {
+          if (ctrl.signal.aborted || replanning) return;
+          setBusy(false);
+          setRefining(false);
+        });
     }, 350);
     return () => {
       clearTimeout(t);
@@ -635,6 +673,11 @@ export default function App() {
 
   /** Ride mode for real: record the ride too, unless already recording. */
   function startRide() {
+    // Ride the route on screen: a better one arriving mid-ride would jump.
+    if (refining) {
+      planCtrl.current?.abort();
+      setRefining(false);
+    }
     if (!recording.state) {
       recording.start(name.trim() || routeTitle());
       autoRecord.current = true;
@@ -831,7 +874,10 @@ export default function App() {
         )}
         {(route || busy) && (
           <section className="summary" aria-live="polite" data-peek>
-            {busy && <div className="progress" />}
+            {(busy || refining) && <div className="progress" />}
+            {refining && route && (
+              <p className="refining">{options.style === "twisty" ? "Looking for twistier roads…" : "Tidying up the loop…"}</p>
+            )}
             {route ? (
               <>
                 <div className="summary-top">

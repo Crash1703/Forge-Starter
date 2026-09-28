@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { LngLatBounds, Map as MapLibre, Marker, NavigationControl, setWorkerUrl, type GeoJSONSource } from "maplibre-gl";
+import { addProtocol, LngLatBounds, Map as MapLibre, Marker, NavigationControl, setWorkerUrl, type GeoJSONSource, type StyleSpecification } from "maplibre-gl";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { FeatureCollection } from "geojson";
@@ -9,6 +9,7 @@ import type { Stop } from "../lib/storage";
 import type { Poi } from "../lib/pois";
 import { type Sight, type SightKind } from "../lib/sights";
 import { iconSvg, POI_ICONS, type IconName } from "./Icon";
+import { loadMapView, registerMapCache, storeMapView, styleFast, transformRequest } from "../lib/mapCache";
 
 const SIGHT_ICON: Record<SightKind, IconName> = {
   viewpoint: "eye",
@@ -84,6 +85,12 @@ const RIDE_PURPLE = "#7b61ff";
 export const TWIST_COLOURS = ["#f5a25d", "#ff6a13", "#e8363d", "#b0126b"];
 
 const styleFor = (theme: Props["theme"]) => (theme === "dark" ? MAP_STYLE_DARK : theme === "topo" ? MAP_STYLE_TOPO : MAP_STYLE);
+/** The style for `theme`, from the phone where saved; `onNewer` gets a fresher copy if the server has one. */
+const quickStyle = (theme: Props["theme"], onNewer: (s: StyleSpecification) => void) => {
+  const s = styleFor(theme);
+  return typeof s === "string" ? styleFast(s, onNewer) : s;
+};
+registerMapCache({ addProtocol });
 
 type Geo = FeatureCollection;
 const EMPTY: Geo = { type: "FeatureCollection", features: [] };
@@ -135,6 +142,8 @@ export default function MapView(props: Props) {
   // Handlers change every render; listeners read the latest through this ref.
   const cb = useRef(props);
   cb.current = props;
+  const themeNow = useRef(props.theme);
+  themeNow.current = props.theme;
 
   const setData = (id: string, geo: Geo) => {
     data.current[id] = geo;
@@ -144,12 +153,19 @@ export default function MapView(props: Props) {
 
   useEffect(() => {
     if (!el.current) return;
+    const last = loadMapView();
     const m = new MapLibre({
       container: el.current,
-      style: styleFor(props.theme),
-      center: [153.0, -27.0],
-      zoom: 7,
+      style: quickStyle(props.theme, (fresh) => themeNow.current === props.theme && m.setStyle(fresh)),
+      center: last ? [last.center.lng, last.center.lat] : [153.0, -27.0],
+      zoom: last?.zoom ?? 7,
       attributionControl: { compact: true },
+      transformRequest,
+    });
+    // Open here next time.
+    m.on("moveend", () => {
+      const c = m.getCenter();
+      storeMapView({ center: { lat: c.lat, lng: c.lng }, zoom: m.getZoom() });
     });
     // Zoom buttons for mouse users; phones pinch.
     if (window.matchMedia("(min-width: 761px)").matches) {
@@ -229,7 +245,8 @@ export default function MapView(props: Props) {
       firstTheme.current = false;
       return;
     }
-    map.current?.setStyle(styleFor(props.theme));
+    const theme = props.theme;
+    map.current?.setStyle(quickStyle(theme, (fresh) => themeNow.current === theme && map.current?.setStyle(fresh)));
   }, [props.theme]);
 
   // The last zoom-to-fit, so a padding change straight after can redo it.

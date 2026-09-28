@@ -1,6 +1,7 @@
 import { setDisplayPrefs } from "./geo";
 import { setKeepRecentSearches } from "./places";
 import { FUEL_CHOICES, type FuelChoice } from "./fuelPrices";
+import { normaliseServer, setRouteServer } from "./routeServer";
 
 /** The rider's preferences, kept on the device. */
 export interface Settings {
@@ -22,6 +23,8 @@ export interface Settings {
   fuelType: FuelChoice;
   /** The rider's own Queensland fuel price token (kept on this device only). */
   fuelToken: string;
+  /** The rider's own route server (empty: the free public one). */
+  routeServer: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -34,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showHome: true,
   fuelType: "p95",
   fuelToken: "",
+  routeServer: "",
 };
 
 const KEY = "forge.settings";
@@ -47,6 +51,7 @@ export function loadSettings(): Settings {
     if (["auto", "24", "12"].includes(raw.clock)) s.clock = raw.clock;
     if (FUEL_CHOICES.some((c) => c.id === raw.fuelType)) s.fuelType = raw.fuelType;
     if (typeof raw.fuelToken === "string") s.fuelToken = raw.fuelToken.trim();
+    if (typeof raw.routeServer === "string") s.routeServer = normaliseServer(raw.routeServer);
     for (const k of ["smartVias", "energySaving", "keepSearches", "showHome"] as const) if (typeof raw[k] === "boolean") s[k] = raw[k];
     return s;
   } catch {
@@ -70,8 +75,9 @@ export function applyTheme(theme: Settings["theme"]) {
   else root.dataset.theme = theme;
 }
 
-/** Put settings into effect: colours, units and clock, search history. */
+/** Put settings into effect: colours, units and clock, search history, route server. */
 export function applySettings(s: Settings) {
+  setRouteServer(s.routeServer);
   applyTheme(s.theme);
   setDisplayPrefs({ units: s.units, clock: s.clock });
   setKeepRecentSearches(s.keepSearches);
