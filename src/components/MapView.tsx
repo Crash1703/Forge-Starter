@@ -7,7 +7,8 @@ import { distance, pathLength, twistSections, type LatLng } from "../lib/geo";
 import type { RouteResult } from "../lib/routes";
 import type { Stop } from "../lib/storage";
 import type { Poi } from "../lib/pois";
-import { MAP_STYLE, MAP_STYLE_DARK } from "../lib/config";
+import { SIGHT_ICONS, type Sight } from "../lib/sights";
+import { MAP_STYLE, MAP_STYLE_DARK, MAP_STYLE_TOPO } from "../lib/config";
 
 // MapLibre looks for its worker next to its own script, which bundling moves;
 // let Vite bundle the worker (with its shared chunk) and point MapLibre at it.
@@ -31,7 +32,8 @@ interface Props {
   hover: LatLng | null;
   /** Changing this re-fits the view to the current route or stops. */
   fitKey: number;
-  theme: "light" | "dark";
+  /** Day, night or terrain map. */
+  theme: "light" | "dark" | "topo";
   /** Pixels of map hidden under the planner panel at the bottom (phones). */
   insetBottom: number;
   /** Pixels hidden under a top banner (Ride mode). */
@@ -46,6 +48,9 @@ interface Props {
   history?: LatLng[][];
   /** Fuel stations and cafés along the route. */
   pois?: Poi[];
+  /** Sights to show as photo bubbles. */
+  sights?: Sight[];
+  onSightClick?: (s: Sight) => void;
   onMapClick: (p: LatLng) => void;
   onStopMove: (id: string, p: LatLng) => void;
   onRouteClick: (p: LatLng, legIndex: number) => void;
@@ -60,6 +65,8 @@ const ALT = "#8a94a6";
 const RIDE_PURPLE = "#7b61ff";
 /** Route colour by twistiness: easy, curvy, twisty, very twisty. */
 export const TWIST_COLOURS = ["#f5a25d", "#ff6a13", "#e8363d", "#b0126b"];
+
+const styleFor = (theme: Props["theme"]) => (theme === "dark" ? MAP_STYLE_DARK : theme === "topo" ? MAP_STYLE_TOPO : MAP_STYLE);
 
 type Geo = FeatureCollection;
 const EMPTY: Geo = { type: "FeatureCollection", features: [] };
@@ -103,6 +110,9 @@ export default function MapView(props: Props) {
   const markers = useRef(new globalThis.Map<string, { marker: Marker; el: HTMLDivElement }>());
   const puck = useRef<{ marker: Marker; el: HTMLDivElement } | null>(null);
   const poiMarkers = useRef<Marker[]>([]);
+  const sightMarkers = useRef<Marker[]>([]);
+  const sightClick = useRef(props.onSightClick);
+  sightClick.current = props.onSightClick;
   // Latest data for each source, so it can be re-applied after a style switch.
   const data = useRef<Record<string, Geo>>({ history: EMPTY, track: EMPTY, alts: EMPTY, route: EMPTY, dots: EMPTY, hover: EMPTY, ride: EMPTY });
   // Handlers change every render; listeners read the latest through this ref.
@@ -119,7 +129,7 @@ export default function MapView(props: Props) {
     if (!el.current) return;
     const m = new MapLibre({
       container: el.current,
-      style: props.theme === "dark" ? MAP_STYLE_DARK : MAP_STYLE,
+      style: styleFor(props.theme),
       center: [153.0, -27.0],
       zoom: 7,
       attributionControl: { compact: true },
@@ -202,7 +212,7 @@ export default function MapView(props: Props) {
       firstTheme.current = false;
       return;
     }
-    map.current?.setStyle(props.theme === "dark" ? MAP_STYLE_DARK : MAP_STYLE);
+    map.current?.setStyle(styleFor(props.theme));
   }, [props.theme]);
 
   // The last zoom-to-fit, so a padding change straight after can redo it.
@@ -294,6 +304,40 @@ export default function MapView(props: Props) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.pois, !!props.ride]);
+
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    sightMarkers.current.forEach((mk) => mk.remove());
+    sightMarkers.current = (props.ride ? [] : (props.sights ?? [])).map((s) => {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.className = `sight${s.photo ? " has-photo" : ""}`;
+      el.setAttribute("aria-label", s.name);
+      el.title = s.name;
+      if (s.photo) {
+        const img = document.createElement("img");
+        img.src = s.photo;
+        img.alt = "";
+        img.loading = "lazy";
+        // No photo after all: fall back to the icon.
+        img.onerror = () => {
+          img.remove();
+          el.classList.remove("has-photo");
+          el.textContent = SIGHT_ICONS[s.kind];
+        };
+        el.appendChild(img);
+      } else el.textContent = SIGHT_ICONS[s.kind];
+      // A tap on a sight is not a tap on the map (which would add a stop).
+      for (const ev of ["mousedown", "touchstart", "pointerdown", "dblclick"]) el.addEventListener(ev, (e) => e.stopPropagation());
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        sightClick.current?.(s);
+      });
+      return new Marker({ element: el }).setLngLat([s.position.lng, s.position.lat]).addTo(m);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.sights, !!props.ride]);
 
   // Ride mode: the road ahead in blue on top.
   useEffect(() => {

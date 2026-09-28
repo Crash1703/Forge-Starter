@@ -10,6 +10,7 @@ import {
   midpointOffset,
   outAndBack,
   findSpurs,
+  loopLayout,
   loopThrough,
   sharedRoad,
   countBends,
@@ -282,5 +283,16 @@ describe("loopThrough", () => {
     const left = loopThrough(home, maleny, 120000, 1).waypoints;
     const right = loopThrough(home, maleny, 120000, -1).waypoints;
     expect(distance(left[0], right[0])).toBeGreaterThan(5000);
+  });
+});
+
+describe("loopLayout", () => {
+  it("keeps a few points as pins and the rest as shaping points after them", () => {
+    const ring = [0, 1, 2, 3, 4].map((i) => ({ lat: 47 + i / 10, lng: 11 }));
+    const { startShape, stops } = loopLayout(ring, [1, 3]);
+    expect(startShape).toEqual([ring[0]]);
+    expect(stops.map((s) => s.index)).toEqual([1, 3]);
+    expect(stops[0].shape).toEqual([ring[2]]);
+    expect(stops[1].shape).toEqual([ring[4]]);
   });
 });

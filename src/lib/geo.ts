@@ -172,6 +172,24 @@ export function loopThrough(
   return { waypoints: out, viaIndex };
 }
 
+/**
+ * Split a generated loop's points (in riding order) into the few that become
+ * pins (`pins`, indices into `ring`) and shaping points, each attached to the
+ * pin before it (or to the start, as `startShape`).
+ */
+export function loopLayout(
+  ring: LatLng[],
+  pins: number[],
+): { startShape: LatLng[]; stops: { position: LatLng; index: number; shape: LatLng[] }[] } {
+  const startShape: LatLng[] = [];
+  const stops: { position: LatLng; index: number; shape: LatLng[] }[] = [];
+  ring.forEach((p, i) => {
+    if (pins.includes(i)) stops.push({ position: p, index: i, shape: [] });
+    else (stops.length ? stops[stops.length - 1].shape : startShape).push(p);
+  });
+  return { startShape, stops };
+}
+
 /** Typical average riding speed by style, for turning a riding time into a loop length. */
 export const LOOP_KMH = { fastest: 75, scenic: 60, twisty: 50 } as const;
 

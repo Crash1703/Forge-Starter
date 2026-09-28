@@ -138,6 +138,11 @@ export interface RoutePoint {
    * result suggests where to move it (see `RouteResult.moves`).
    */
   movable?: boolean;
+  /**
+   * A shaping point: the route passes near it without stopping, and it
+   * doesn't split the route into legs or count as a numbered stop.
+   */
+  via?: boolean;
 }
 
 /** Twisty's helper points only pull the route sideways; any road nearby will do. */
@@ -146,6 +151,15 @@ const HELPER_RADIUS = 1500;
 interface Waypoint extends RoutePoint {
   /** Pass through without splitting the route into another leg. */
   via: boolean;
+}
+
+/**
+ * Each point's stop number as the rider sees it (A is 0, then 1, 2, ...),
+ * or -1 for shaping points, which aren't numbered.
+ */
+function stopNumbers(points: RoutePoint[]): number[] {
+  let n = 0;
+  return points.map((p, i) => (i > 0 && p.via ? -1 : n++));
 }
 
 /** Valhalla location type: legs split at "break*" types, U-turns allowed only at "break" and "via". */
@@ -333,7 +347,8 @@ export async function planRoute(
 ): Promise<RouteResult[]> {
   const stops = points.map((p) => p.pos);
   if (stops.length > MAX_STOPS) throw new RoutingError(`A route can have at most ${MAX_STOPS} stops.`);
-  let base: Waypoint[] = points.map((p) => ({ ...p, via: false }));
+  let base: Waypoint[] = points.map((p, i) => ({ ...p, via: !!p.via && i > 0 && i < points.length - 1 }));
+  const numbers = stopNumbers(base);
   let baseRoutes: ValhallaTrip[];
   let turnsAround = false;
   try {
@@ -357,7 +372,7 @@ export async function planRoute(
   // version rides less road twice.
   const ridesTwice = (trip: ValhallaTrip) => {
     const path = toResult(trip, "", []).path;
-    return points.slice(1, -1).map((p) => outAndBack(path, p.pos));
+    return points.slice(1, -1).map((p, i) => (base[i + 1].via ? 0 : outAndBack(path, p.pos)));
   };
   const twice = ridesTwice(baseRoutes[0]);
   if (twice.some((m, i) => m > SPUR_METRES && points[i + 1].noUturn)) {
@@ -381,7 +396,7 @@ export async function planRoute(
   const withWarnings = (r: RouteResult): RouteResult => {
     const spurs = points
       .slice(1, -1)
-      .flatMap((p, i) => (outAndBack(r.path, p.pos) > SPUR_METRES ? [spurWarning(i + 1)] : []));
+      .flatMap((p, i) => (numbers[i + 1] > 0 && outAndBack(r.path, p.pos) > SPUR_METRES ? [spurWarning(numbers[i + 1])] : []));
     // Each dead end the route rides up and back, blamed on the generated
     // point that led it there: the one it reached nearest the spur's tip.
     const moves: { stop: number; to: LatLng }[] = [];
@@ -390,7 +405,8 @@ export async function planRoute(
       let bestDist = MOVE_REACH;
       points.forEach((p, i) => {
         if (!p.movable || i === 0 || i === points.length - 1 || moves.some((m) => m.stop === i)) return;
-        const d = Math.min(distance(p.pos, spur.tip), distance(reachedStop(r, i) ?? p.pos, spur.tip));
+        const reached = numbers[i] > 0 ? reachedStop(r, numbers[i]) : null;
+        const d = Math.min(distance(p.pos, spur.tip), distance(reached ?? p.pos, spur.tip));
         if (d < bestDist) {
           best = i;
           bestDist = d;
@@ -517,14 +533,17 @@ export async function planSections(
 ): Promise<RouteResult[]> {
   if (points.length > MAX_STOPS) throw new RoutingError(`A route can have at most ${MAX_STOPS} stops.`);
   const sections: RouteResult[] = [];
-  for (let i = 0; i < points.length - 1; i++) {
-    const legOpts = { ...opts, style: styles[i] ?? opts.style, returnToStart: false };
+  // One section per pair of numbered stops, with any shaping points between them.
+  const breaks = points.flatMap((p, i) => (i === 0 || i === points.length - 1 || !p.via ? [i] : []));
+  for (let k = 0; k < breaks.length - 1; k++) {
+    const legOpts = { ...opts, style: styles[k] ?? opts.style, returnToStart: false };
     // A section's own ends are plain stops; U-turn rules apply between stops, not at them.
-    const pair = [{ ...points[i], noUturn: false }, { ...points[i + 1], noUturn: false }];
+    const between = points.slice(breaks[k], breaks[k + 1] + 1);
+    const pair = between.map((p, j) => (j === 0 || j === between.length - 1 ? { ...p, noUturn: false, via: false } : p));
     let [best] = await planRoute(pair, legOpts, signal);
-    if (opts.returnToStart && i > 0) {
+    if (opts.returnToStart && k > 0) {
       const earlier = sections.map((r) => r.path);
-      const ends = [points[i].pos, points[i + 1].pos];
+      const ends = [pair[0].pos, pair[pair.length - 1].pos];
       if (sharedRoad(best.path, earlier, ends) >= LOOP_SHARED_METRES) {
         try {
           const [other] = await planRoute(pair, legOpts, signal, avoidPoints(earlier, ends));
