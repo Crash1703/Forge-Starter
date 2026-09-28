@@ -5,6 +5,7 @@ import BottomSheet, { type Snap } from "./components/BottomSheet";
 import TwistGauge from "./components/TwistGauge";
 import RideView from "./components/RideView";
 import RidesPanel from "./components/RidesPanel";
+import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
 import WeatherStrip from "./components/WeatherStrip";
 import StopsAlong from "./components/StopsAlong";
 import type { Poi } from "./lib/pois";
@@ -22,6 +23,7 @@ import {
   formatDuration,
   isDaylight,
   LOOP_KMH,
+  loopLayout,
   loopThrough,
   roundTripWaypoints,
   twistScore,
@@ -38,6 +40,8 @@ import {
   loadSaved,
   newId,
   normalizeLoop,
+  reverseStops,
+  routePoints,
   storeSaved,
   type SavedRoute,
   type Stop,
@@ -53,17 +57,6 @@ const STYLES: { id: RouteStyle; name: string; hint: string }[] = [
 const BUILD = (import.meta.env.VITE_BUILD_ID as string | undefined)?.slice(0, 7) || "dev";
 
 /** Compass rose for round trips: 8 directions around "any direction". */
-const COMPASS: { label: string; name: string; deg: number | null }[] = [
-  { label: "NW", name: "North-west", deg: 315 },
-  { label: "N", name: "North", deg: 0 },
-  { label: "NE", name: "North-east", deg: 45 },
-  { label: "W", name: "West", deg: 270 },
-  { label: "Any", name: "Any direction", deg: null },
-  { label: "E", name: "East", deg: 90 },
-  { label: "SW", name: "South-west", deg: 225 },
-  { label: "S", name: "South", deg: 180 },
-  { label: "SE", name: "South-east", deg: 135 },
-];
 
 type MapTheme = "auto" | "light" | "dark";
 const THEME_KEY = "forge.mapTheme";
@@ -111,6 +104,9 @@ export default function App() {
   const [loopKm, setLoopKm] = useState(120);
   const [loopMode, setLoopMode] = useState<"distance" | "time">("distance");
   const [loopMin, setLoopMin] = useState(120);
+  const [loopScreen, setLoopScreen] = useState(false);
+  const [loopStart, setLoopStart] = useState<LoopStart>("here");
+  const [locating, setLocating] = useState(false);
   const [loopDir, setLoopDir] = useState<number | null>(null); // compass degrees, null = any
   const [loopVia, setLoopVia] = useState<{ label: string; position: LatLng } | null>(null);
   // A time-based loop is checked once against its planned riding time, and resized if well off.
@@ -230,7 +226,9 @@ export default function App() {
   );
 
   // Recompute whenever the stops or options change (debounced so dragging feels calm).
-  const stopsKey = stops.map((s) => `${s.position.lat},${s.position.lng}${s.auto ? "*" : ""}${s.legStyle ?? ""}`).join("|");
+  const stopsKey = stops
+    .map((s) => `${s.position.lat},${s.position.lng}${s.auto ? "*" : ""}${s.legStyle ?? ""}${(s.shape ?? []).map((p) => `/${p.lat},${p.lng}`).join("")}`)
+    .join("|");
   useEffect(() => {
     if (stops.length < 2) {
       setRoutes([]);
@@ -243,12 +241,15 @@ export default function App() {
     const t = window.setTimeout(() => {
       setBusy(true);
       const ride = ridePath(stops, options.returnToStart);
+      const plan = routePoints(stops, options.returnToStart);
       // No turning back at stops on a loop (or at generated loop points), so
       // the route can't ride up a dead end and straight back down it.
-      const points = ride.map((s, i) => {
-        const between = i > 0 && i < ride.length - 1;
+      const points = plan.map(({ position, stop: s, shape }, i) => {
+        const between = i > 0 && i < plan.length - 1;
+        // Shaping points only steer: the route may pass anywhere within 2 km.
+        if (between && shape >= 0) return { pos: position, via: true, radius: 2000, movable: true };
         return {
-          pos: s.position,
+          pos: position,
           noUturn: between && (options.returnToStart || s.auto),
           // Generated loop points are arbitrary, so any road within 1 km will do;
           // the rider's own pins may snap to a road within 75 m.
@@ -265,10 +266,19 @@ export default function App() {
           // points count as placed, so this happens once per point.
           const moves = r[0]?.moves ?? [];
           if (moves.length) {
-            const to = new Map(moves.map((m) => [ride[m.stop].id, m.to]));
-            setStops((ss) => ss.map((s) => (to.has(s.id) ? { ...s, position: to.get(s.id)!, auto: false } : s)));
-            moves.forEach((m) => labelStop(ride[m.stop].id, m.to));
-            flash(moves.length === 1 ? "Moved a loop point off a dead end" : `Moved ${moves.length} loop points off dead ends`);
+            // A pin moves to the foot of the dead end; a shaping point that
+            // led there is simply dropped.
+            const to = new Map(moves.filter((m) => plan[m.stop].shape < 0).map((m) => [plan[m.stop].stop.id, m.to]));
+            const drop = new Set(moves.filter((m) => plan[m.stop].shape >= 0).map((m) => `${plan[m.stop].stop.id}/${plan[m.stop].shape}`));
+            setStops((ss) =>
+              ss.map((s) => {
+                const shape = s.shape?.filter((_, k) => !drop.has(`${s.id}/${k}`));
+                const moved = to.has(s.id) ? { position: to.get(s.id)!, auto: false } : {};
+                return { ...s, ...moved, ...(s.shape ? { shape } : {}) };
+              }),
+            );
+            to.forEach((p, id) => labelStop(id, p));
+            flash(moves.length === 1 ? "Kept the loop off a dead end" : `Kept the loop off ${moves.length} dead ends`);
             replanning = true;
             return;
           }
@@ -348,24 +358,27 @@ export default function App() {
   /** Direction (or side, for a loop via a place) of the last loop made, reused when resizing it. */
   const loopShape = useRef<{ heading: number; side: 1 | -1 }>({ heading: 0, side: 1 });
 
-  function makeLoop(km?: number, sameShape = false) {
-    const origin = stops[0];
+  /**
+   * Make a loop from `from` (default: the first stop): two pins round a
+   * circle, with shaping points between them so the loop keeps its shape
+   * without the rider having to reach many exact places.
+   */
+  function makeLoop(km?: number, sameShape = false, from?: Stop) {
+    const origin = from ?? stops[0];
     if (!origin) {
       flash("Set a start point first");
       return;
     }
     const length = km ?? (loopMode === "distance" ? loopKm : (loopMin / 60) * LOOP_KMH[options.style]);
-    let via: Stop[];
+    let ring: LatLng[];
+    let pins = [1, 3];
+    let viaIndex = -1;
     if (loopVia) {
       // A different way round each time, unless resizing.
       const side = sameShape ? loopShape.current.side : Math.random() < 0.5 ? 1 : -1;
       loopShape.current.side = side;
-      const { waypoints, viaIndex } = loopThrough(origin.position, loopVia.position, length * 1000, side);
-      via = waypoints.map((p, i) =>
-        i === viaIndex
-          ? { id: newId(), position: p, label: loopVia.label }
-          : { id: newId(), position: p, label: "Locating…", auto: true },
-      );
+      ({ waypoints: ring, viaIndex } = loopThrough(origin.position, loopVia.position, length * 1000, side, 5));
+      pins = [...new Set([viaIndex, ...pins])];
     } else {
       // A chosen direction still varies a little, so "another loop" differs.
       const heading = sameShape
@@ -374,18 +387,52 @@ export default function App() {
           ? Math.random() * 360
           : (loopDir + Math.random() * 40 - 20 + 360) % 360;
       loopShape.current.heading = heading;
-      via = roundTripWaypoints(origin.position, length * 1000, heading).map((p) => ({
-        id: newId(),
-        position: p,
-        label: "Locating…",
-        auto: true,
-      }));
+      ring = roundTripWaypoints(origin.position, length * 1000, heading, 5);
     }
-    setStops([{ ...origin, auto: false }, ...via]);
+    const layout = loopLayout(ring, pins);
+    const via: Stop[] = layout.stops.map((p) =>
+      p.index === viaIndex
+        ? { id: newId(), position: p.position, label: loopVia!.label, shape: p.shape, auto: false }
+        : { id: newId(), position: p.position, label: "Locating…", auto: true, shape: p.shape },
+    );
+    setStops([{ ...origin, shape: layout.startShape, auto: false }, ...via]);
     setOptions((o) => ({ ...o, returnToStart: true }));
     via.filter((v) => v.auto).forEach((v) => labelStop(v.id, v.position));
     loopFit.current = loopMode === "time" && km === undefined ? { targetSec: loopMin * 60, km: length } : null;
     wantFit.current = true;
+  }
+
+  function openLoopScreen() {
+    setLoopStart(stops.length ? "first" : "here");
+    setLoopScreen(true);
+  }
+
+  /** "Create a round trip": from where the rider is now, or from stop A. */
+  function createLoop() {
+    if (loopStart === "first") {
+      setLoopScreen(false);
+      makeLoop();
+      return;
+    }
+    if (!navigator.geolocation) {
+      flash("Location isn't available here. Pick a start point instead.");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setCenter(p);
+        setLoopScreen(false);
+        makeLoop(undefined, false, { id: newId(), position: p, label: "My location" });
+      },
+      () => {
+        setLocating(false);
+        flash("Couldn't get your location");
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
   }
 
   function locateMe() {
@@ -746,7 +793,7 @@ export default function App() {
                   <button
                     onClick={() =>
                       // On a loop, keep the start and ride the loop the other way round.
-                      setStops((ss) => (options.returnToStart ? [ss[0], ...ss.slice(1).reverse()] : ss.slice().reverse()))
+                      setStops((ss) => reverseStops(ss, options.returnToStart))
                     }
                   >
                     ⇅ Reverse
@@ -810,78 +857,19 @@ export default function App() {
               </div>
             </section>
 
-            <section>
+            <section className="rt-card">
               <h2>Round trip</h2>
-              <div className="segmented two" role="radiogroup" aria-label="Plan the loop by">
-                {(["distance", "time"] as const).map((m) => (
-                  <button key={m} role="radio" aria-checked={loopMode === m} onClick={() => setLoopMode(m)}>
-                    {m === "distance" ? "Distance" : "Riding time"}
+              <p className="hint">A loop from your start, back home a different way.</p>
+              <div className="button-row">
+                <button className="primary" onClick={openLoopScreen}>
+                  ↻ Plan a round trip
+                </button>
+                {options.returnToStart && stops.some((s) => s.auto || s.shape?.length) && (
+                  <button onClick={() => makeLoop()} title="Same settings, a different loop">
+                    ⟳ Recalculate
                   </button>
-                ))}
-              </div>
-              <div className="loop">
-                {loopMode === "distance" ? (
-                  <input
-                    id="loop-km"
-                    type="range"
-                    min={20}
-                    max={500}
-                    step={10}
-                    value={loopKm}
-                    onChange={(e) => setLoopKm(+e.target.value)}
-                    aria-label="Round trip length"
-                  />
-                ) : (
-                  <input
-                    id="loop-min"
-                    type="range"
-                    min={30}
-                    max={480}
-                    step={15}
-                    value={loopMin}
-                    onChange={(e) => setLoopMin(+e.target.value)}
-                    aria-label="Round trip riding time"
-                  />
                 )}
-                <output>{loopMode === "distance" ? `${loopKm} km` : formatDuration(loopMin * 60)}</output>
               </div>
-              <div className="loop-options">
-                <div className={`compass${loopVia ? " disabled" : ""}`} role="radiogroup" aria-label="Head out towards">
-                  {COMPASS.map((c) => (
-                    <button
-                      key={c.label}
-                      role="radio"
-                      aria-checked={loopDir === c.deg}
-                      aria-label={c.name}
-                      title={c.name}
-                      disabled={!!loopVia}
-                      onClick={() => setLoopDir(c.deg)}
-                    >
-                      {c.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="loop-via">
-                  <small>{loopVia ? "Riding via" : "Head out towards a direction, or ride via a place:"}</small>
-                  {loopVia ? (
-                    <span className="chip">
-                      {loopVia.label}
-                      <button aria-label={`Don't ride via ${loopVia.label}`} onClick={() => setLoopVia(null)}>
-                        ✕
-                      </button>
-                    </span>
-                  ) : (
-                    <PlaceSearch
-                      near={stops[0]?.position ?? center}
-                      placeholder="Via a place (optional)"
-                      onPick={(label, p) => setLoopVia({ label, position: p })}
-                    />
-                  )}
-                </div>
-              </div>
-              <button className="wide" onClick={() => makeLoop()} disabled={!stops.length}>
-                ↻ {options.returnToStart && stops.some((s) => s.auto) ? "Try another loop" : "Make a loop from A"}
-              </button>
             </section>
 
             {(busy || error || route) && (
@@ -1111,6 +1099,9 @@ export default function App() {
           >
             <span aria-hidden>{recording.state ? "■" : "●"}</span>
           </button>
+          <button className="fab" onClick={openLoopScreen} aria-label="Plan a round trip" title="Plan a round trip">
+            <span aria-hidden>↻</span>
+          </button>
           <button className="fab" onClick={centreOnMe} aria-label="Show my location">
             <span aria-hidden>◎</span>
           </button>
@@ -1142,6 +1133,30 @@ export default function App() {
               </button>
             </div>
           </div>
+        )}
+        {loopScreen && (
+          <RoundTripScreen
+            mode={loopMode}
+            onMode={setLoopMode}
+            km={loopKm}
+            onKm={setLoopKm}
+            minutes={loopMin}
+            onMinutes={setLoopMin}
+            style={options.style}
+            styles={STYLES}
+            onStyle={(v) => setOpt("style", v)}
+            dir={loopDir}
+            onDir={setLoopDir}
+            via={loopVia}
+            onVia={setLoopVia}
+            start={loopStart}
+            onStart={setLoopStart}
+            firstStop={stops[0]?.label}
+            near={stops[0]?.position ?? center}
+            busy={locating}
+            onCreate={createLoop}
+            onClose={() => setLoopScreen(false)}
+          />
         )}
         {toast && <div className="toast">{toast}</div>}
       </main>

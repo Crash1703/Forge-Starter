@@ -9,6 +9,45 @@ export interface Stop {
   auto?: boolean;
   /** Ride style from this stop to the next, when it differs from the route's. */
   legStyle?: RouteStyle;
+  /**
+   * Shaping points on the way from this stop to the next: the route passes
+   * near them without stopping there. Generated loops use them to keep
+   * their shape with few pins.
+   */
+  shape?: LatLng[];
+}
+
+/**
+ * Every point to route through, in order, with where it came from: a stop,
+ * or one of the shaping points after it (`shape` is its index).
+ */
+export function routePoints(stops: Stop[], loop: boolean): { position: LatLng; stop: Stop; shape: number }[] {
+  const out: { position: LatLng; stop: Stop; shape: number }[] = [];
+  stops.forEach((s, i) => {
+    out.push({ position: s.position, stop: s, shape: -1 });
+    // The last stop's shaping points lead home, so they only count on a loop.
+    if (i < stops.length - 1 || loop) (s.shape ?? []).forEach((p, k) => out.push({ position: p, stop: s, shape: k }));
+  });
+  if (loop && stops.length > 1) out.push({ position: stops[0].position, stop: stops[0], shape: -1 });
+  return out;
+}
+
+/**
+ * The same route ridden the other way. On a loop the start stays first.
+ * Shaping points move to the stop that now begins their leg, in reverse.
+ */
+export function reverseStops(stops: Stop[], loop: boolean): Stop[] {
+  const n = stops.length;
+  if (n < 2) return stops;
+  // Leg i runs from stop i to stop i+1 (wrapping home on a loop).
+  const order = loop ? [0, ...stops.slice(1).map((_, i) => n - 1 - i)] : stops.map((_, i) => n - 1 - i);
+  return order.map((idx, j) => {
+    const next = order[j + 1] ?? (loop ? order[0] : -1);
+    // Reversed, the leg idx -> next was originally next -> idx, shaped by stop `next`.
+    const shape = next >= 0 ? stops[next].shape?.slice().reverse() : undefined;
+    const { shape: _drop, legStyle: _style, ...rest } = stops[idx];
+    return { ...rest, ...(shape?.length ? { shape } : {}), ...(next >= 0 && stops[next].legStyle ? { legStyle: stops[next].legStyle } : {}) };
+  });
 }
 
 const STYLE_CODE: Record<RouteStyle, string> = { fastest: "f", scenic: "s", twisty: "t" };
@@ -52,10 +91,13 @@ export function encodeShare(stops: Stop[], o: RouteOptions): string {
   const flags = [o.avoidHighways, o.avoidTolls, o.avoidFerries, o.returnToStart].map((b) => (b ? 1 : 0)).join("");
   // encodeURIComponent leaves "~" alone, but it is our separator.
   const enc = (s: string) => encodeURIComponent(s).replace(/~/g, "%7E");
-  // A section's own style rides along as a 4th field: f, s or t.
-  const pts = stops.map(
-    (s) => `${s.position.lat.toFixed(5)},${s.position.lng.toFixed(5)},${enc(s.label)}${s.legStyle ? `,${STYLE_CODE[s.legStyle]}` : ""}`,
-  );
+  // A section's own style rides along as a 4th field (f, s or t), and any
+  // shaping points after the stop as a 5th ("lat:lng;lat:lng").
+  const pts = stops.map((s) => {
+    const shape = (s.shape ?? []).map((p) => `${p.lat.toFixed(5)}:${p.lng.toFixed(5)}`).join(";");
+    const extra = shape ? `,${s.legStyle ? STYLE_CODE[s.legStyle] : ""},${shape}` : s.legStyle ? `,${STYLE_CODE[s.legStyle]}` : "";
+    return `${s.position.lat.toFixed(5)},${s.position.lng.toFixed(5)},${enc(s.label)}${extra}`;
+  });
   return `#r=${[`${o.style}.${o.vehicle}.${flags}`, ...pts].join("~")}`;
 }
 
@@ -65,11 +107,24 @@ export function decodeShare(hash: string): { stops: Stop[]; options: RouteOption
   const [head, ...pts] = m[1].split("~");
   const [style, vehicle, flags = "000"] = head.split(".");
   const stops = pts.flatMap((p) => {
-    const [lat, lng, label = "", code = ""] = p.split(",");
+    const [lat, lng, label = "", code = "", shapeText = ""] = p.split(",");
     const position = { lat: parseFloat(lat), lng: parseFloat(lng) };
     if (!Number.isFinite(position.lat) || !Number.isFinite(position.lng)) return [];
     const legStyle = CODE_STYLE[code];
-    return [{ id: newId(), label: decodeURIComponent(label) || `${lat}, ${lng}`, position, ...(legStyle ? { legStyle } : {}) }];
+    const shape = shapeText
+      .split(";")
+      .map((q) => q.split(":").map(parseFloat))
+      .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b))
+      .map(([a, b]) => ({ lat: a, lng: b }));
+    return [
+      {
+        id: newId(),
+        label: decodeURIComponent(label) || `${lat}, ${lng}`,
+        position,
+        ...(legStyle ? { legStyle } : {}),
+        ...(shape.length ? { shape } : {}),
+      },
+    ];
   });
   if (stops.length < 2) return null;
   const options: RouteOptions = {

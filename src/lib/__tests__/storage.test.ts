@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeShare, encodeShare, normalizeLoop } from "../storage";
+import { decodeShare, encodeShare, normalizeLoop, reverseStops, routePoints } from "../storage";
 import { defaultOptions } from "../routes";
 
 describe("share links", () => {
@@ -60,5 +60,38 @@ describe("section styles in share links", () => {
     ];
     const back = decodeShare(encodeShare(stops, defaultOptions))!;
     expect(back.stops.map((s) => s.legStyle)).toEqual(["fastest", "twisty", undefined]);
+  });
+});
+
+describe("shaping points", () => {
+  const p = (lat: number, lng: number) => ({ lat, lng });
+  const home = { id: "h", label: "Home", position: p(47, 11), shape: [p(47.1, 11)] };
+  const a = { id: "a", label: "A", position: p(47.2, 11.1), shape: [p(47.2, 11.2)], legStyle: "twisty" as const };
+  const b = { id: "b", label: "B", position: p(47.1, 11.3), shape: [p(47.05, 11.2)] };
+
+  it("lists every point to route through, shaping points after their stop", () => {
+    const loop = routePoints([home, a, b], true);
+    expect(loop.map((x) => `${x.stop.id}${x.shape}`)).toEqual(["h-1", "h0", "a-1", "a0", "b-1", "b0", "h-1"]);
+    // One-way: the last stop's shaping points would lead nowhere.
+    expect(routePoints([home, a, b], false).map((x) => `${x.stop.id}${x.shape}`)).toEqual(["h-1", "h0", "a-1", "a0", "b-1"]);
+  });
+
+  it("reverses a loop with each leg's shaping points and style", () => {
+    const r = reverseStops([home, a, b], true);
+    expect(r.map((s) => s.id)).toEqual(["h", "b", "a"]);
+    // Home -> B was B -> home, shaped by B's points.
+    expect(r[0].shape).toEqual(b.shape);
+    // A -> home was home -> A.
+    expect(r[2].shape).toEqual(home.shape);
+    // B -> A was A -> B, ridden twisty.
+    expect(r[1]).toMatchObject({ shape: a.shape, legStyle: "twisty" });
+    const flat = routePoints(r, true).map((x) => x.position);
+    expect(flat).toEqual(routePoints([home, a, b], true).map((x) => x.position).reverse());
+  });
+
+  it("keeps shaping points in share links", () => {
+    const back = decodeShare(encodeShare([home, a, b], { ...defaultOptions, returnToStart: true }))!;
+    expect(back.stops.map((s) => s.shape)).toEqual([home.shape, a.shape, b.shape]);
+    expect(back.stops[1].legStyle).toBe("twisty");
   });
 });
