@@ -28,6 +28,7 @@ import {
   countBends,
   curvinessLabel,
   distance,
+  midpointOffset,
   formatDistance,
   formatDuration,
   isDaylight,
@@ -509,7 +510,9 @@ export default function App() {
   }
 
   /** Direction (or side, for a loop via a place) of the last loop made, reused when resizing it. */
-  const loopShape = useRef<{ heading: number; side: 1 | -1; fitted: number }>({ heading: 0, side: 1, fitted: 0 });
+  const loopShape = useRef<{ heading: number; side: 1 | -1; fitted: number; variant: number }>({ heading: 0, side: 1, fitted: 0, variant: 0 });
+  /** The place a loop was made to visit, as its stop (so Recalculate knows the loop is ours to redo). */
+  const [placeStopId, setPlaceStopId] = useState<string | null>(null);
   /** The last loop via a place was sized to fit the place (from a place's card), not to a length. */
   const loopFitsPlace = useRef(false);
 
@@ -519,6 +522,11 @@ export default function App() {
    * without the rider having to reach many exact places. Via a place, the
    * loop is an oval out to the place and back another way, with the place
    * as its only pin; `fitPlace` makes it just big enough for that.
+   *
+   * A loop that fits the place has no guessed points at all: the road out
+   * is the router's choice, and the way home is re-planned to stay off it
+   * (see planRoute), so both follow real roads. Recalculate then tries one
+   * steering point off to one side, then the other, then none again.
    */
   function makeLoop(
     km?: number,
@@ -538,7 +546,18 @@ export default function App() {
     let viaIndex = -1;
     // Resize to fit the riding time only when that's possible.
     let canFit = true;
-    if (place) {
+    if (place && fitPlace) {
+      // 0: no steering; 1 and 2: one point off to the left or right of the
+      // straight line, on the way out (the way home finds its own road).
+      const variant = sameShape ? loopShape.current.variant : (loopShape.current.variant + 1) % 3;
+      loopShape.current.variant = variant;
+      const d = distance(origin.position, place.position);
+      const steer = variant === 0 ? [] : [midpointOffset(origin.position, place.position, (variant === 1 ? 1 : -1) * Math.min(0.25, 5000 / Math.max(d, 1)))];
+      ring = [...steer, place.position];
+      viaIndex = ring.length - 1;
+      pins = [viaIndex];
+      canFit = false;
+    } else if (place) {
       // The other way round each time (out the way it came back last
       // time), unless resizing; a loop that fits the place also varies in
       // width a little, so Recalculate always gives a different ride.
@@ -568,13 +587,14 @@ export default function App() {
         : { id: newId(), position: p.position, label: "Locating…", auto: true, shape: p.shape },
     );
     setStops([{ ...origin, shape: layout.startShape, auto: false }, ...via]);
+    setPlaceStopId(place && fitPlace ? (via.find((v) => !v.auto)?.id ?? null) : null);
     setOptions((o) => ({ ...o, returnToStart: true }));
     via.filter((v) => v.auto).forEach((v) => labelStop(v.id, v.position));
     loopFit.current = loopMode === "time" && km === undefined && canFit ? { targetSec: loopMin * 60, km: length } : null;
     wantFit.current = true;
   }
 
-  const isGeneratedLoop = options.returnToStart && stops.some((s) => s.auto || s.shape?.length);
+  const isGeneratedLoop = options.returnToStart && stops.some((s) => s.auto || s.shape?.length || s.id === placeStopId);
   const avoidCount = [options.avoidHighways && options.style === "fastest", options.avoidTolls, options.avoidFerries].filter(Boolean).length;
 
   /** Open (or close) a summary menu, with room below it in the planner. */
@@ -629,6 +649,8 @@ export default function App() {
   /** "Create a round trip": from home, where the rider is now, or stop A. */
   function createLoop(start: LoopStart = loopStart, place = loopVia, fitPlace = false) {
     loopFitsPlace.current = fitPlace;
+    // A new loop via a place starts with no steering (variant 0).
+    loopShape.current.variant = -1;
     if (start === "home" && home) {
       setLoopScreen(false);
       makeLoop(undefined, false, { id: newId(), position: home.position, label: home.label }, place, fitPlace);

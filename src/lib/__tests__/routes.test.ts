@@ -204,6 +204,15 @@ describe("twisty helper points", () => {
     expect(distance(r.moves![0].to, foot)).toBeLessThan(40);
   });
 
+  it("snaps points that only steer the route to through roads, not tracks", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ trip: tripAlong([start, end], 20) }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await planRoute([{ pos: start }, { pos: destination(start, 90, 8000), via: true, radius: 2000, movable: true }, { pos: end }], defaultOptions);
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.locations[1].type).toBe("through");
+    expect(body.locations[1].search_filter).toEqual({ min_road_class: "tertiary" });
+  });
+
   it("moves a generated point whose dead end stops short of it", async () => {
     // The pin is in a river 800 m past the end of the road the router picked.
     const tip = destination(start, 90, 8000);

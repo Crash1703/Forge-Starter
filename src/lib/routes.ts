@@ -195,8 +195,10 @@ async function computeRoutes(
       type: locationType(p),
       ...(p.radius ? { radius: Math.round(p.radius) } : {}),
       ...(p.heading != null ? { heading: Math.round(p.heading), heading_tolerance: 60 } : {}),
-      // Generated points: skip residential streets and service roads, where cul-de-sacs are.
-      ...(p.movable ? { search_filter: { min_road_class: "unclassified" } } : {}),
+      // Generated points: skip residential streets and service roads, where
+      // cul-de-sacs are; points that only steer the route snap to proper
+      // through roads (tertiary or better), never a track in a forest.
+      ...(p.movable ? { search_filter: { min_road_class: p.via ? "tertiary" : "unclassified" } } : {}),
     })),
     ...costing(opts),
     ...(alternatives && points.length === 2 ? { alternates: 2 } : {}),
