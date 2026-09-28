@@ -191,6 +191,23 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
           </p>
         ) : null}
         {simulate && <p className="ride-preview">Preview ride · 4× speed</p>}
+        <button
+          className="ride-round ride-mute"
+          aria-label={muted ? "Turn voice on" : "Mute voice"}
+          aria-pressed={muted}
+          onClick={() => {
+            const m = !muted;
+            setMuted(m);
+            try {
+              localStorage.setItem(MUTE_KEY, m ? "1" : "0");
+            } catch {
+              /* remembered for this ride only */
+            }
+          }}
+        >
+          {muted ? "🔇" : "🔊"}
+        </button>
+
       </div>
 
       {!follow && (
@@ -213,22 +230,6 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
           <strong>{eta ? eta.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "–"}</strong>
           <span>{state ? `${formatDistance(state.remaining)} · ${formatDuration(state.remainingTime)}` : "starting…"}</span>
         </div>
-        <button
-          className="ride-round"
-          aria-label={muted ? "Turn voice on" : "Mute voice"}
-          aria-pressed={muted}
-          onClick={() => {
-            const m = !muted;
-            setMuted(m);
-            try {
-              localStorage.setItem(MUTE_KEY, m ? "1" : "0");
-            } catch {
-              /* remembered for this ride only */
-            }
-          }}
-        >
-          {muted ? "🔇" : "🔊"}
-        </button>
         <button className="ride-end" onClick={onExit}>
           End
         </button>

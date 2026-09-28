@@ -376,18 +376,30 @@ export default function App() {
       ) : (
       <BottomSheet snap={snap} onSnap={setSnap} onCover={setCover}>
         {(route || busy) && (
-          <section className="summary" aria-live="polite">
+          <section className="summary" aria-live="polite" data-peek>
             {busy && <div className="progress" />}
             {route ? (
               <>
                 <TwistGauge curviness={route.curviness} />
                 <div className="summary-text">
                   <strong>
-                    {formatDistance(route.distance)} · {formatDuration(route.duration)}
+                    <span className="nowrap">{formatDistance(route.distance)}</span> ·{" "}
+                    <span className="nowrap">{formatDuration(route.duration)}</span>
                   </strong>
                   <span>
-                    {bends} bends{profile ? ` · ${Math.round(profile.ascent)} m climb` : ""}
-                    {options.returnToStart ? " · loop" : ""}
+                    {[
+                      `${bends} ${bends === 1 ? "bend" : "bends"}`,
+                      profile ? `${Math.round(profile.ascent)} m climb` : null,
+                      options.returnToStart ? "loop" : null,
+                    ]
+                      .filter(Boolean)
+                      .map((part, i) => (
+                        // Each phrase stays whole; lines break between them.
+                        <span key={i}>
+                          {i > 0 && " · "}
+                          <span className="nowrap">{part}</span>
+                        </span>
+                      ))}
                   </span>
                   <button className="link preview" onClick={() => setRiding({ simulate: true })} disabled={busy}>
                     ▷ Preview ride
@@ -422,7 +434,7 @@ export default function App() {
         {tab === "plan" ? (
           <div className="scroll">
             <section>
-              <div onFocusCapture={() => setSnap("full")}>
+              <div onFocusCapture={() => setSnap("full")} data-peek={route ? undefined : ""}>
               <PlaceSearch
                 near={stops[stops.length - 1]?.position ?? center}
                 placeholder={stops.length ? "Add a stop or destination" : "Search for a start point"}

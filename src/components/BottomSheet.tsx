@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 export type Snap = "peek" | "half" | "full";
 
@@ -10,7 +10,8 @@ interface Props {
   children: ReactNode;
 }
 
-const PEEK = 148;
+/** Smallest peek, before anything marked data-peek has been measured. */
+const MIN_PEEK = 120;
 const phoneQuery = "(max-width: 760px)";
 
 function useIsPhone() {
@@ -38,20 +39,48 @@ function useViewportHeight() {
  * The planner. On desktop, a side panel. On phones, a panel over a
  * full-screen map that rests at three heights (a peek at the summary, half,
  * or nearly full) and follows your finger when you drag its handle.
+ *
+ * The peek fits whatever inside is marked `data-peek` (the route summary, or
+ * the search box before there's a route), however big the phone's text is.
  */
 export default function BottomSheet({ snap, onSnap, onCover, children }: Props) {
   const phone = useIsPhone();
   const vh = useViewportHeight();
-  const heights: Record<Snap, number> = { peek: PEEK, half: Math.round(vh * 0.5), full: vh - 64 };
+  const sheet = useRef<HTMLElement>(null);
+  const [peek, setPeek] = useState(MIN_PEEK);
+  const heights: Record<Snap, number> = {
+    peek,
+    half: Math.max(peek, Math.round(vh * 0.5)),
+    full: vh - 64,
+  };
   const [drag, setDrag] = useState<number | null>(null); // px dragged up (+) or down (-)
   const start = useRef<{ y: number; t: number; moved: boolean } | null>(null);
 
-  const visible = Math.min(heights.full, Math.max(PEEK, heights[snap] + (drag ?? 0)));
+  const visible = Math.min(heights.full, Math.max(peek, heights[snap] + (drag ?? 0)));
+
+  // Measure the peek: down to the bottom of the last data-peek element.
+  useLayoutEffect(() => {
+    const el = sheet.current;
+    if (!phone || !el) return;
+    const measure = () => {
+      const top = el.getBoundingClientRect().top;
+      const marks = [...el.querySelectorAll<HTMLElement>("[data-peek]")];
+      const bottom = Math.max(0, ...marks.map((m) => m.getBoundingClientRect().bottom - top));
+      // Plus the navigation bar, which the panel's bottom edge sits behind.
+      const nav = parseFloat(getComputedStyle(el).paddingBottom) || 0;
+      setPeek(Math.round(Math.min(vh * 0.45, Math.max(MIN_PEEK, bottom + 10 + nav))));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    el.querySelectorAll("[data-peek]").forEach((m) => ro.observe(m));
+    return () => ro.disconnect();
+  });
 
   useEffect(() => {
     onCover(phone ? heights[snap] : 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phone, snap, vh]);
+  }, [phone, snap, vh, peek]);
 
   if (!phone) return <aside className="panel">{children}</aside>;
 
@@ -86,6 +115,7 @@ export default function BottomSheet({ snap, onSnap, onCover, children }: Props) 
 
   return (
     <aside
+      ref={sheet}
       className={`panel sheet${drag != null ? " dragging" : ""}`}
       style={{ height: heights.full, transform: `translateY(${heights.full - visible}px)` }}
       aria-label="Route planner"
