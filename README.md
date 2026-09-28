@@ -11,6 +11,7 @@ A motorcycle-focused route planner in the spirit of Calimoto, built entirely on 
 - **Map-first design**: on phones the map fills the screen and the planner slides up from the bottom. A 0–10 twistiness gauge and bend count sit on the summary card, and the route line is coloured by twistiness (orange → red → purple). There's a day, night or automatic map (dark after sunset).
 - **Ride recording and logbook**: tap the red button on the map to record any ride. Rides in Ride mode record automatically. The **Rides** tab lists every ride with distance, riding time, average and top speed (a 5-second average, so GPS spikes don't count), bends, climb, an estimated lean angle (from speed and bend radius) and the twistiest 5 km, plus speed and elevation charts. You can export a ride as GPX, plan it again, or show all your rides as faint lines on the map. Rides are kept in the device's IndexedDB. The ride in progress is saved as a draft, so a crash or a killed app doesn't lose it.
 - **Weather on the way**: the forecast for when you'll actually reach each part of the route (leaving now, in 1–3 hours or tomorrow morning), with temperature, rain chance and wind, and a warning if rain is likely somewhere along the ride.
+- **Sights**: tap **📷 Sights** on the map to show lookouts, waterfalls, attractions, landmarks and more in view, as photo bubbles where Wikipedia has a picture. Tap one to add it as a stop, plan a loop via it, or open its Wikipedia page.
 - **Fuel & cafés**: find fuel stations, cafés and bakeries near the route, shown on the map and listed by distance along the ride. Set your tank range and it warns about any stretch with no fuel for longer than that.
 - **Per-section ride styles**: give each leg its own style (say, fast to the hills, twisty through them, then fast home) from the menu next to each stop. Styles are kept in share links.
 - **Backup and restore**: the **Saved** tab can download all saved routes and recorded rides as one file and restore it, so you can move them between the website and the app, or to a new phone. Restoring merges; it doesn't delete anything.
@@ -35,7 +36,8 @@ Open http://localhost:5173. That's it: no keys needed.
 | Routing | [Valhalla](https://github.com/valhalla/valhalla) on the FOSSGIS public server | Fair use, about 1 request per second |
 | Place search | [Photon](https://photon.komoot.io) by Komoot | Fair use |
 | Elevation and weather | [Open-Meteo](https://open-meteo.com) elevation and forecast APIs | 10,000 calls/day, non-commercial |
-| Fuel & cafés | [Overpass API](https://overpass-api.de) (OpenStreetMap data) | Fair use; looked up only when you ask |
+| Fuel, cafés and sights | [Overpass API](https://overpass-api.de) (OpenStreetMap data) | Fair use; looked up only when you ask |
+| Sight photos | [Wikidata](https://www.wikidata.org) and [Wikimedia Commons](https://commons.wikimedia.org) | Free; photos are credited on Commons |
 
 The public servers are run by volunteers and non-profits. That's fine for personal use. For a public app with real traffic, run your own Valhalla and Photon (both have Docker images) or use a paid host, then point the app at them in `.env` (see `.env.example`).
 
@@ -104,6 +106,7 @@ src/
     device.ts             GPS, voice, keep-awake (native in the app)
     weather.ts            Open-Meteo forecast along the route
     pois.ts               Overpass fuel/café lookup and fuel gaps
+    sights.ts             sights in view (Overpass) with photos (Wikidata/Commons)
 ```
 
 ## Limits to know about

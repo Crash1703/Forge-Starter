@@ -11,3 +11,4 @@ export const PHOTON_URL: string = env.VITE_PHOTON_URL || "https://photon.komoot.
 export const ELEVATION_URL: string = env.VITE_ELEVATION_URL || "https://api.open-meteo.com/v1/elevation";
 export const FORECAST_URL: string = env.VITE_FORECAST_URL || "https://api.open-meteo.com/v1/forecast";
 export const OVERPASS_URL: string = env.VITE_OVERPASS_URL || "https://overpass-api.de/api/interpreter";
+export const WIKIDATA_URL: string = env.VITE_WIKIDATA_URL || "https://www.wikidata.org/w/api.php";

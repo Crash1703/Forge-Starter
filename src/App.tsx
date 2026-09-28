@@ -6,6 +6,7 @@ import TwistGauge from "./components/TwistGauge";
 import RideView from "./components/RideView";
 import RidesPanel from "./components/RidesPanel";
 import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
+import { MAX_SPAN, SIGHT_ICONS, SIGHT_NAMES, sightsIn, type Bounds, type Sight } from "./lib/sights";
 import WeatherStrip from "./components/WeatherStrip";
 import StopsAlong from "./components/StopsAlong";
 import type { Poi } from "./lib/pois";
@@ -107,6 +108,10 @@ export default function App() {
   const [loopScreen, setLoopScreen] = useState(false);
   const [loopStart, setLoopStart] = useState<LoopStart>("here");
   const [locating, setLocating] = useState(false);
+  const [sightsOn, setSightsOn] = useState(false);
+  const [sights, setSights] = useState<Sight[]>([]);
+  const [sightsNote, setSightsNote] = useState("");
+  const [sight, setSight] = useState<Sight | null>(null);
   const [loopDir, setLoopDir] = useState<number | null>(null); // compass degrees, null = any
   const [loopVia, setLoopVia] = useState<{ label: string; position: LatLng } | null>(null);
   // A time-based loop is checked once against its planned riding time, and resized if well off.
@@ -144,6 +149,54 @@ export default function App() {
     // Runs when a freshly planned route arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route, busy]);
+
+  // Sights for the part of the map in view, re-checked as the map moves.
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!sightsOn || !m) {
+      setSights([]);
+      setSightsNote("");
+      return;
+    }
+    let loaded: Bounds | null = null;
+    let ctrl: AbortController | null = null;
+    let timer = 0;
+    const inside = (b: Bounds, o: Bounds) => b.south >= o.south && b.north <= o.north && b.west >= o.west && b.east <= o.east;
+    const check = () => {
+      const g = m.getBounds();
+      const b = { south: g.getSouth(), west: g.getWest(), north: g.getNorth(), east: g.getEast() };
+      if (b.north - b.south > MAX_SPAN || b.east - b.west > MAX_SPAN) {
+        setSightsNote("Zoom in to see sights");
+        return;
+      }
+      if (loaded && inside(b, loaded)) return;
+      // Fetch a little beyond the view so small pans don't need another lookup.
+      const padLat = (b.north - b.south) * 0.25;
+      const padLng = (b.east - b.west) * 0.25;
+      const want = { south: b.south - padLat, north: b.north + padLat, west: b.west - padLng, east: b.east + padLng };
+      ctrl?.abort();
+      ctrl = new AbortController();
+      setSightsNote("Looking for sights…");
+      sightsIn(want, ctrl.signal)
+        .then((found) => {
+          loaded = want;
+          setSights(found);
+          setSightsNote(found.length ? "" : "No sights found here");
+        })
+        .catch((e: Error) => e.name !== "AbortError" && setSightsNote(e.message));
+    };
+    const onMove = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(check, 700);
+    };
+    check();
+    m.on("moveend", onMove);
+    return () => {
+      m.off("moveend", onMove);
+      clearTimeout(timer);
+      ctrl?.abort();
+    };
+  }, [sightsOn]);
 
   // Auto map theme: dark from dusk to dawn where the map is (checked every 5 minutes).
   useEffect(() => {
@@ -1079,12 +1132,68 @@ export default function App() {
             ride={riding ? (rideLayer ?? { ahead: route?.path ?? [], position: null, heading: null, follow: true }) : null}
             onFollowBroken={() => setFollowBreaks((n) => n + 1)}
             onMapReady={(m) => (mapRef.current = m)}
+            sights={sights}
+            onSightClick={setSight}
             onMapClick={(p) => addStop(p)}
             onStopMove={moveStop}
             onRouteClick={(p, leg) => addStop(p, undefined, leg + 1)}
             onSelectRoute={setSelected}
           />
         </MapErrorBoundary>
+        {!riding && (
+          <div className="map-chips">
+            <button
+              className="chip-toggle"
+              aria-pressed={sightsOn}
+              onClick={() => {
+                setSightsOn((on) => !on);
+                setSight(null);
+              }}
+            >
+              <span aria-hidden>📷</span> Sights{sightsOn && <span aria-hidden> ✕</span>}
+            </button>
+            {sightsOn && sightsNote && <span className="chip-note">{sightsNote}</span>}
+          </div>
+        )}
+        {!riding && sight && (
+          <div className="sight-card" role="dialog" aria-label={sight.name}>
+            {sight.photo && <img src={sight.photo.replace(/width=\d+/, "width=480")} alt="" />}
+            <div className="sight-body">
+              <small>
+                {SIGHT_ICONS[sight.kind]} {SIGHT_NAMES[sight.kind]}
+              </small>
+              <strong>{sight.name}</strong>
+              <div className="button-row">
+                <button
+                  className="primary"
+                  onClick={() => {
+                    addStop(sight.position, sight.name);
+                    setSight(null);
+                  }}
+                >
+                  ＋ Add as stop
+                </button>
+                <button
+                  onClick={() => {
+                    setLoopVia({ label: sight.name, position: sight.position });
+                    setSight(null);
+                    openLoopScreen();
+                  }}
+                >
+                  ↻ Loop via here
+                </button>
+                {sight.link && (
+                  <a className="button" href={sight.link} target="_blank" rel="noreferrer">
+                    Wikipedia ↗
+                  </a>
+                )}
+              </div>
+            </div>
+            <button className="close" aria-label="Close" onClick={() => setSight(null)}>
+              ✕
+            </button>
+          </div>
+        )}
         {!riding && (
         <div className="fabs">
           <button className="fab" onClick={cycleTheme} aria-label={`Map style: ${themePref}. Change`} title="Day, night or automatic map">
