@@ -264,27 +264,58 @@ describe("sun", () => {
 });
 
 describe("loopThrough", () => {
-  const home = { lat: -26.65, lng: 153.05 };
-  const maleny = { lat: -26.76, lng: 152.85 };
+  const home = { lat: -26.8, lng: 153.13 }; // Caloundra
+  const mountain = { lat: -26.93, lng: 152.9 }; // Mount Coonowrin, ~27 km away
+  const away = (p: { lat: number; lng: number }) => {
+    // Sideways distance from the line home → mountain (metres, signed).
+    const d = distance(home, p);
+    const off = ((bearing(home, p) - bearing(home, mountain) + 540) % 360) - 180;
+    return d * Math.sin((off * Math.PI) / 180);
+  };
 
-  it("puts the chosen place on the loop and keeps it about the asked length", () => {
-    const { waypoints, viaIndex } = loopThrough(home, maleny, 120000, 1);
-    expect(waypoints[viaIndex]).toEqual(maleny);
-    const loop = pathLength([home, ...waypoints, home]);
-    expect(loop).toBeGreaterThan((120000 / 1.35) * 0.8);
-    expect(loop).toBeLessThan((120000 / 1.35) * 1.1);
+  it("goes out one side, through the place, and back the other side", () => {
+    const { waypoints, viaIndex } = loopThrough(home, mountain, 0, 1);
+    expect(viaIndex).toBe(2);
+    expect(waypoints[viaIndex]).toEqual(mountain);
+    const [o1, o2, , b1, b2] = waypoints.map(away);
+    expect(Math.sign(o1)).toBe(Math.sign(o2));
+    expect(Math.sign(b1)).toBe(Math.sign(b2));
+    expect(Math.sign(o1)).toBe(-Math.sign(b1));
   });
 
-  it("grows the loop when the place is too far for the asked length", () => {
-    const { waypoints } = loopThrough(home, maleny, 20000, 1);
-    // The place is ~23 km away, so the loop must be at least ~46 km in a straight line.
-    expect(pathLength([home, ...waypoints, home])).toBeGreaterThan(46000);
+  it("fits the place: a narrow oval, no wide swing off to one side", () => {
+    const { waypoints, minMetres } = loopThrough(home, mountain, 0, 1);
+    const d = distance(home, mountain);
+    // The way back is a few km from the way out, not half the distance away.
+    const widest = Math.max(...waypoints.map((p) => Math.abs(away(p))));
+    expect(widest).toBeGreaterThan(2500);
+    expect(widest).toBeLessThan(d * 0.2);
+    // About twice the distance, by road.
+    expect(minMetres).toBeGreaterThan(2 * d);
+    expect(minMetres).toBeLessThan(2 * d * 1.35 * 1.2);
+  });
+
+  it("widens to make a longer loop, up to a circle", () => {
+    const narrow = loopThrough(home, mountain, 0, 1).waypoints;
+    const wide = loopThrough(home, mountain, 110000, 1).waypoints;
+    const widest = (w: typeof narrow) => Math.max(...w.map((p) => Math.abs(away(p))));
+    expect(widest(wide)).toBeGreaterThan(widest(narrow) * 2);
+    expect(pathLength([home, ...wide, home]) * 1.35).toBeGreaterThan(110000 * 0.8);
+  });
+
+  it("becomes a bigger circle through the place when asked for a long loop", () => {
+    const near = destination(home, 250, 7000);
+    const { waypoints, viaIndex } = loopThrough(home, near, 150000, 1);
+    expect(waypoints[viaIndex]).toEqual(near);
+    const loop = pathLength([home, ...waypoints, home]) * 1.35;
+    expect(loop).toBeGreaterThan(150000 * 0.75);
+    expect(loop).toBeLessThan(150000 * 1.1);
   });
 
   it("goes round either way", () => {
-    const left = loopThrough(home, maleny, 120000, 1).waypoints;
-    const right = loopThrough(home, maleny, 120000, -1).waypoints;
-    expect(distance(left[0], right[0])).toBeGreaterThan(5000);
+    const left = loopThrough(home, mountain, 0, 1).waypoints;
+    const right = loopThrough(home, mountain, 0, -1).waypoints;
+    expect(Math.sign(away(left[0]))).toBe(-Math.sign(away(right[0])));
   });
 });
 

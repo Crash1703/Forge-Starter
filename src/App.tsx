@@ -147,6 +147,9 @@ export default function App() {
   const [sights, setSights] = useState<Sight[]>([]);
   const [sightsNote, setSightsNote] = useState("");
   const [sight, setSight] = useState<Sight | null>(null);
+  /** The open place's "Loop via here": choosing where to start. */
+  const [loopPick, setLoopPick] = useState(false);
+  useEffect(() => setLoopPick(false), [sight]);
   const [loopDir, setLoopDir] = useState<number | null>(null); // compass degrees, null = any
   const [loopVia, setLoopVia] = useState<{ label: string; position: LatLng } | null>(null);
   // A time-based loop is checked once against its planned riding time, and resized if well off.
@@ -506,14 +509,24 @@ export default function App() {
   }
 
   /** Direction (or side, for a loop via a place) of the last loop made, reused when resizing it. */
-  const loopShape = useRef<{ heading: number; side: 1 | -1 }>({ heading: 0, side: 1 });
+  const loopShape = useRef<{ heading: number; side: 1 | -1; fitted: number }>({ heading: 0, side: 1, fitted: 0 });
+  /** The last loop via a place was sized to fit the place (from a place's card), not to a length. */
+  const loopFitsPlace = useRef(false);
 
   /**
    * Make a loop from `from` (default: the first stop): two pins round a
    * circle, with shaping points between them so the loop keeps its shape
-   * without the rider having to reach many exact places.
+   * without the rider having to reach many exact places. Via a place, the
+   * loop is an oval out to the place and back another way, with the place
+   * as its only pin; `fitPlace` makes it just big enough for that.
    */
-  function makeLoop(km?: number, sameShape = false, from?: Stop) {
+  function makeLoop(
+    km?: number,
+    sameShape = false,
+    from?: Stop,
+    place: { label: string; position: LatLng } | null = loopVia,
+    fitPlace = loopFitsPlace.current,
+  ) {
     const origin = from ?? stops[0];
     if (!origin) {
       flash("Set a start point first");
@@ -523,12 +536,21 @@ export default function App() {
     let ring: LatLng[];
     let pins = [1, 3];
     let viaIndex = -1;
-    if (loopVia) {
-      // A different way round each time, unless resizing.
-      const side = sameShape ? loopShape.current.side : Math.random() < 0.5 ? 1 : -1;
+    // Resize to fit the riding time only when that's possible.
+    let canFit = true;
+    if (place) {
+      // The other way round each time (out the way it came back last
+      // time), unless resizing; a loop that fits the place also varies in
+      // width a little, so Recalculate always gives a different ride.
+      const side = sameShape ? loopShape.current.side : loopShape.current.side > 0 ? -1 : 1;
       loopShape.current.side = side;
-      ({ waypoints: ring, viaIndex } = loopThrough(origin.position, loopVia.position, length * 1000, side, 5));
-      pins = [...new Set([viaIndex, ...pins])];
+      const shortest = loopThrough(origin.position, place.position, 0, side).minMetres;
+      const target = fitPlace ? (sameShape ? loopShape.current.fitted : shortest * (1 + Math.random() * 0.3)) : length * 1000;
+      loopShape.current.fitted = target;
+      const loop = loopThrough(origin.position, place.position, target, side);
+      ({ waypoints: ring, viaIndex } = loop);
+      canFit = !fitPlace && loop.minMetres < length * 1000 * 0.9;
+      pins = [viaIndex];
     } else {
       // A chosen direction still varies a little, so "another loop" differs.
       const heading = sameShape
@@ -542,13 +564,13 @@ export default function App() {
     const layout = loopLayout(ring, pins);
     const via: Stop[] = layout.stops.map((p) =>
       p.index === viaIndex
-        ? { id: newId(), position: p.position, label: loopVia!.label, shape: p.shape, auto: false }
+        ? { id: newId(), position: p.position, label: place!.label, shape: p.shape, auto: false }
         : { id: newId(), position: p.position, label: "Locating…", auto: true, shape: p.shape },
     );
     setStops([{ ...origin, shape: layout.startShape, auto: false }, ...via]);
     setOptions((o) => ({ ...o, returnToStart: true }));
     via.filter((v) => v.auto).forEach((v) => labelStop(v.id, v.position));
-    loopFit.current = loopMode === "time" && km === undefined ? { targetSec: loopMin * 60, km: length } : null;
+    loopFit.current = loopMode === "time" && km === undefined && canFit ? { targetSec: loopMin * 60, km: length } : null;
     wantFit.current = true;
   }
 
@@ -604,16 +626,17 @@ export default function App() {
     setLoopScreen(true);
   }
 
-  /** "Create a round trip": from where the rider is now, or from stop A. */
-  function createLoop() {
-    if (loopStart === "home" && home) {
+  /** "Create a round trip": from home, where the rider is now, or stop A. */
+  function createLoop(start: LoopStart = loopStart, place = loopVia, fitPlace = false) {
+    loopFitsPlace.current = fitPlace;
+    if (start === "home" && home) {
       setLoopScreen(false);
-      makeLoop(undefined, false, { id: newId(), position: home.position, label: home.label });
+      makeLoop(undefined, false, { id: newId(), position: home.position, label: home.label }, place, fitPlace);
       return;
     }
-    if (loopStart === "first") {
+    if (start === "first") {
       setLoopScreen(false);
-      makeLoop();
+      makeLoop(undefined, false, undefined, place, fitPlace);
       return;
     }
     if (!navigator.geolocation) {
@@ -627,7 +650,7 @@ export default function App() {
         const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         setCenter(p);
         setLoopScreen(false);
-        makeLoop(undefined, false, { id: newId(), position: p, label: "My location" });
+        makeLoop(undefined, false, { id: newId(), position: p, label: "My location" }, place, fitPlace);
       },
       () => {
         setLocating(false);
@@ -1473,8 +1496,8 @@ export default function App() {
           </>
         )}
         {!riding && sight && (
-          <div className="sight-card" role="dialog" aria-label={sight.name}>
-            {sight.photo && <img src={sight.photo.replace(/width=\d+/, "width=480")} alt="" />}
+          <div className={`sight-card${loopPick ? " picking" : ""}`} role="dialog" aria-label={sight.name}>
+            {sight.photo && !loopPick && <img src={sight.photo.replace(/width=\d+/, "width=480")} alt="" />}
             <div className="sight-body">
               <small>
                 {SIGHT_NAMES[sight.kind]}
@@ -1492,10 +1515,11 @@ export default function App() {
                   <Icon name="plus" size={18} /> Add as stop
                 </button>
                 <button
+                  aria-expanded={loopPick}
                   onClick={() => {
-                    setLoopVia({ label: sight.name, position: sight.position });
-                    setSight(null);
-                    openLoopScreen();
+                    // Room for the choices below the card.
+                    if (!loopPick) setSnap("peek");
+                    setLoopPick((o) => !o);
                   }}
                 >
                   <Icon name="loop" size={18} /> Loop via here
@@ -1506,6 +1530,45 @@ export default function App() {
                   </a>
                 )}
               </div>
+              {loopPick && (
+                <div className="loop-pick" role="group" aria-label="Start the loop from">
+                  <small>Start the loop from</small>
+                  {(
+                    [
+                      home && ["home", `Home`],
+                      ["here", "My location"],
+                      // The current start, unless that's just home or here again.
+                      stops[0] &&
+                        stops[0].label !== "My location" &&
+                        !(home && distance(stops[0].position, home.position) < 200) && ["first", `A · ${stops[0].label}`],
+                    ].filter(Boolean) as [LoopStart, string][]
+                  ).map(([start, label]) => (
+                    <button
+                      key={start}
+                      disabled={locating}
+                      onClick={() => {
+                        const place = { label: sight.name, position: sight.position };
+                        setLoopVia(place);
+                        setLoopStart(start);
+                        setSight(null);
+                        createLoop(start, place, true);
+                      }}
+                    >
+                      <Icon name={start === "home" ? "home" : start === "here" ? "locate" : "navigate"} size={18} /> {label}
+                    </button>
+                  ))}
+                  <button
+                    className="link"
+                    onClick={() => {
+                      setLoopVia({ label: sight.name, position: sight.position });
+                      setSight(null);
+                      openLoopScreen();
+                    }}
+                  >
+                    Set a length or time…
+                  </button>
+                </div>
+              )}
             </div>
             <button className="close" aria-label="Close" onClick={() => setSight(null)}>
               ✕
@@ -1604,7 +1667,7 @@ export default function App() {
             home={home?.label}
             near={stops[0]?.position ?? center}
             busy={locating}
-            onCreate={createLoop}
+            onCreate={() => createLoop()}
             onClose={() => setLoopScreen(false)}
           />
         )}
