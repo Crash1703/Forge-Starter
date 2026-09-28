@@ -9,6 +9,7 @@ import {
   formatDuration,
   midpointOffset,
   outAndBack,
+  spurBase,
   loopThrough,
   sharedRoad,
   countBends,
@@ -134,6 +135,14 @@ describe("outAndBack", () => {
   it("measures a dead-end spur ridden up and back", () => {
     const path = [origin, junction, tip, junction, east(junction, 2000)];
     expect(outAndBack(path, tip)).toBeGreaterThan(500);
+  });
+
+  it("finds the foot of the spur", () => {
+    const path = [origin, junction, tip, junction, east(junction, 2000)];
+    const base = spurBase(path, destination(tip, 90, 50));
+    expect(base).not.toBeNull();
+    expect(distance(base!, junction)).toBeLessThan(40);
+    expect(spurBase([origin, junction, east(junction, 2000)], tip)).toBeNull();
   });
 
   it("catches a spur that ends in a turning circle", () => {
