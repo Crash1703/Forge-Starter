@@ -1,0 +1,14 @@
+name: Fuel API probe (temporary)
+on:
+  push:
+    branches: [claude/route-planning-google-maps-xxipbl]
+    paths: [scripts/fuel-probe.mjs, .github/workflows/fuel-probe.yml]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/fuel-probe.mjs
