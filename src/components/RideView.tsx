@@ -16,6 +16,8 @@ interface Props {
   /** Bumped when the rider drags the map, which pauses following. */
   followBreaks: number;
   onLayer: (layer: RideLayer | null) => void;
+  /** The rider paused (or resumed) the ride: hold recording too. */
+  onPause?: (paused: boolean) => void;
   onExit: () => void;
 }
 
@@ -28,7 +30,7 @@ const REROUTE_GAP_MS = 15_000;
  * speed and limit, time to go. Leave the route and it finds a way back onto
  * it ahead, instead of re-planning the whole ride.
  */
-export default function RideView({ route, options, loop, simulate, followBreaks, onLayer, onExit }: Props) {
+export default function RideView({ route, options, loop, simulate, followBreaks, onLayer, onPause, onExit }: Props) {
   const plan: NavRoute = { path: route.path, steps: route.steps, distance: route.distance, duration: route.duration };
   const active = useRef<NavRoute>(plan);
   const nav = useRef(new Navigator(plan));
@@ -44,6 +46,9 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
   // "Finish here" turns a loop into a ride that ends somewhere else.
   const [endsHome, setEndsHome] = useState(loop);
   const lastFix = useRef<Fix | null>(null);
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  const letSleepRef = useRef<Stop>(() => undefined);
   const [muted, setMuted] = useState(() => {
     try {
       return localStorage.getItem(MUTE_KEY) === "1";
@@ -84,6 +89,8 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
       setGpsNote("");
       setFix(f);
       lastFix.current = f;
+      // Paused: show where you are, but no directions, voice or rerouting.
+      if (pausedRef.current) return;
       const n = nav.current;
       const s = n.update(f);
       setState(s);
@@ -128,6 +135,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
     (async () => {
       if (!simulate) await askToShowRideNotification();
       letSleep = await keepScreenOn().catch(() => () => undefined);
+      letSleepRef.current = letSleep;
       stopGps = simulate
         ? simulateRide(route.path, onFix)
         : subscribeGps(onFix, (m) => !cancelled && setGpsNote(m));
@@ -137,6 +145,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
       cancelled = true;
       stopGps();
       letSleep();
+      letSleepRef.current();
       onLayer(null);
     };
     // One ride per mount.
@@ -177,6 +186,27 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
     setAdding(false);
     say(mode === "via" ? `Added a stop at ${place.name}.` : `Heading to ${place.name}.`);
     setState(nav.current.update(f));
+  }
+
+  /** Pause: hold directions, voice, rerouting and recording; let the screen sleep. */
+  async function togglePause() {
+    const on = !pausedRef.current;
+    pausedRef.current = on;
+    setPaused(on);
+    setAdding(false);
+    onPause?.(on);
+    if (on) {
+      letSleepRef.current();
+      letSleepRef.current = () => undefined;
+      say("Ride paused.");
+    } else {
+      letSleepRef.current = await keepScreenOn().catch(() => () => undefined);
+      // Don't go looking for a way back straight away if you've wandered off.
+      lastReroute.current = Date.now() - REROUTE_GAP_MS + 5000;
+      say("Resuming your ride.");
+      const f = lastFix.current;
+      if (f) setState(nav.current.update(f));
+    }
   }
 
   // Tell the map what to draw: the road ahead and where you are.
@@ -224,7 +254,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
             Then <ManeuverIcon kind={maneuverKind(after.type)} size={24} />
           </div>
         )}
-        {(state && !state.onRoute) || rerouting ? (
+        {paused ? null : (state && !state.onRoute) || rerouting ? (
           <p className="ride-banner" role="status">
             Off route: finding the way back to your route…
           </p>
@@ -250,10 +280,25 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
         >
           {muted ? "🔇" : "🔊"}
         </button>
+        {!state?.arrived && (
+          <button className="ride-round ride-pause" aria-label={paused ? "Resume ride" : "Pause ride"} aria-pressed={paused} onClick={() => void togglePause()}>
+            {paused ? "▶" : "⏸"}
+          </button>
+        )}
 
       </div>
 
-      {adding && (
+      {paused && (
+        <div className="ride-paused" role="status">
+          <strong>⏸ Ride paused</strong>
+          <span>Directions, voice{onPause ? " and recording" : ""} are on hold.</span>
+          <button className="primary" onClick={() => void togglePause()}>
+            ▶ Resume
+          </button>
+        </div>
+      )}
+
+      {adding && !paused && (
         <RideAddStop
           from={state?.snapped ?? fix?.position ?? route.path[0]}
           ahead={state ? active.current.path.slice(n.indexAt(state.along)) : active.current.path}
@@ -282,7 +327,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
           <strong>{eta ? eta.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "–"}</strong>
           <span>{state ? `${formatDistance(state.remaining)} · ${formatDuration(state.remainingTime)}` : "starting…"}</span>
         </div>
-        {!state?.arrived && (
+        {!state?.arrived && !paused && (
           <button className="ride-addstop" aria-label="Add a stop" onClick={() => setAdding((a) => !a)} aria-expanded={adding}>
             ＋<small>Stop</small>
           </button>

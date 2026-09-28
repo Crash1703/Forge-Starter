@@ -1,5 +1,6 @@
 import type { LatLng } from "./geo";
-import { OVERPASS_URL, WIKIDATA_URL } from "./config";
+import { WIKIDATA_URL } from "./config";
+import { overpass, type OverpassElement } from "./overpass";
 
 export type SightKind = "viewpoint" | "attraction" | "museum" | "zoo" | "park" | "peak" | "waterfall" | "historic";
 
@@ -48,14 +49,6 @@ export const SIGHT_NAMES: Record<SightKind, string> = {
 /** Bigger than this (degrees across) and the query would be huge: ask the rider to zoom in. */
 export const MAX_SPAN = 1.2;
 
-interface OverpassElement {
-  type: string;
-  id: number;
-  lat?: number;
-  lon?: number;
-  center?: { lat: number; lon: number };
-  tags?: Record<string, string>;
-}
 
 export function sightsQuery(b: Bounds): string {
   const box = `(${b.south.toFixed(4)},${b.west.toFixed(4)},${b.north.toFixed(4)},${b.east.toFixed(4)})`;
@@ -177,15 +170,7 @@ export async function addPhotos(sights: Sight[], signal?: AbortSignal): Promise<
 
 /** Sights within `b`: the best 40, with photos where Wikidata has them. */
 export async function sightsIn(b: Bounds, signal?: AbortSignal): Promise<Sight[]> {
-  const res = await fetch(OVERPASS_URL, {
-    method: "POST",
-    signal,
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `data=${encodeURIComponent(sightsQuery(b))}`,
-  });
-  if (!res.ok) throw new Error(res.status === 429 ? "The map data server is busy. Try again in a minute." : "Couldn't look up sights");
-  const json: { elements?: OverpassElement[] } = await res.json();
-  const best = rankSights(parseSights(json.elements ?? []));
+  const best = rankSights(parseSights(await overpass(sightsQuery(b), signal)));
   try {
     return await addPhotos(best, signal);
   } catch (e) {

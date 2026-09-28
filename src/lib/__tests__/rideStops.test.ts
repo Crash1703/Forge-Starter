@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { destination, resample } from "../geo";
-import { firstStretch, placesQuery, rankPlaces } from "../rideStops";
+import { boxesAlong, firstStretch, placesQuery, rankPlaces } from "../rideStops";
 
 const rider = { lat: -26.7, lng: 152.9 };
 const east = (m: number) => destination(rider, 90, m);
@@ -8,10 +8,26 @@ const line = resample([0, 5000, 10000, 15000, 20000].map(east), 250);
 const el = (id: number, p: { lat: number; lng: number }, tags: Record<string, string> = {}) => ({ type: "node", id, lat: p.lat, lon: p.lng, tags });
 
 describe("stops while riding", () => {
-  it("looks along the road ahead and around the rider", () => {
+  it("looks in a few small boxes along the road ahead and around the rider", () => {
     const q = placesQuery("food", line, rider);
-    expect(q).toContain('nwr["amenity"~"^(cafe|restaurant|fast_food|pub)$"](around:1000,');
+    // 20 km of road: two 10 km boxes per filter, plus around the rider.
+    expect(q.match(/nwr\["amenity"~"\^\(cafe\|restaurant\|fast_food\|pub\)\$"\]\(-26\.\d+,152\.\d+,-26\.\d+,153?\.\d+\);/g)).toHaveLength(2);
     expect(q).toContain('nwr["shop"="bakery"](around:3000,-26.70000,152.90000)');
+  });
+
+  it("boxes cover the road with a margin", () => {
+    const boxes = boxesAlong(line);
+    expect(boxes).toHaveLength(2);
+    const [s, w, n, e] = boxes[0];
+    expect(s).toBeLessThan(rider.lat);
+    expect(n).toBeGreaterThan(rider.lat);
+    expect(w).toBeLessThan(rider.lng);
+    expect(e).toBeGreaterThan(east(9000).lng);
+  });
+
+  it("drops places in a box's corner, away from the road and the rider", () => {
+    const far = rankPlaces([el(9, destination(east(15000), 0, 1800), { amenity: "fuel" })], "fuel", line, rider);
+    expect(far).toEqual([]);
   });
 
   it("lists places on the way first, nearest ahead first, then others nearby", () => {
