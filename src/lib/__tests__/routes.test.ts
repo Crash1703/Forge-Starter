@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { destination, distance } from "../geo";
-import { costing, defaultOptions, planRoute, planSections, routeVia, spurWarning, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
+import { costing, defaultOptions, planRoute, planSections, routeVia, snapToRoad, spurWarning, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
 
 /** Encode points as a precision-6 polyline, the format Valhalla returns. */
 function encode6(pts: [number, number][]): string {
@@ -72,6 +72,12 @@ describe("toResult", () => {
     expect(r.duration).toBe(900);
     expect(r.legs).toEqual([{ distance: 5000, duration: 400 }, { distance: 7500, duration: 500 }]);
     expect(r.steps.map((s) => s.instruction)).toEqual(["Drive north on B171.", "You have arrived."]);
+    // Where the route meets each stop: the start of each leg, then the finish.
+    expect(r.stopsAt).toEqual([
+      { lat: 47.1, lng: 11.1 },
+      { lat: 47.2, lng: 11.2 },
+      { lat: 47.3, lng: 11.3 },
+    ]);
   });
 });
 
@@ -416,6 +422,7 @@ describe("per-section ride styles", () => {
       ["Arrive.", 2],
     ]);
     expect(r.legs).toHaveLength(2);
+    expect(r.stopsAt).toHaveLength(3);
   });
 });
 
@@ -576,5 +583,31 @@ describe("adding a stop while riding", () => {
     const body = JSON.parse(((fetchMock.mock.calls[0] as unknown) as [string, RequestInit])[1].body as string);
     expect(body.locations).toHaveLength(2);
     expect(r.distance).toBe(3000);
+  });
+});
+
+describe("snapping a pin to the road", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const paddock = { lat: -26.86, lng: 152.97 };
+  const locate = (pts: { lat: number; lng: number }[]) =>
+    new Response(JSON.stringify([{ input_lat: paddock.lat, input_lon: paddock.lng, edges: pts.map((q) => ({ correlated_lat: q.lat, correlated_lon: q.lng })), nodes: [] }]));
+
+  it("moves the pin to the nearest road the router knows", async () => {
+    const road = { lat: -26.85929, lng: 152.969123 };
+    const fetchMock = vi.fn(async () => locate([destination(paddock, 0, 600), road]));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await snapToRoad(paddock, defaultOptions)).toEqual(road);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/locate$/);
+    expect(JSON.parse(init.body as string)).toMatchObject({ costing: "motorcycle", locations: [{ lat: paddock.lat, lon: paddock.lng }] });
+  });
+
+  it("leaves the pin where it is when the nearest road is far away, or the router doesn't answer", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => locate([destination(paddock, 90, 3000)])));
+    expect(await snapToRoad(paddock, defaultOptions)).toEqual(paddock);
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("offline"))));
+    expect(await snapToRoad(paddock, defaultOptions)).toEqual(paddock);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("[]")));
+    expect(await snapToRoad(paddock, defaultOptions)).toEqual(paddock);
   });
 });

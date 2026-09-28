@@ -60,6 +60,11 @@ export interface RouteResult {
    * at the foot of that dead end: move the stop there and re-plan.
    */
   moves?: { stop: number; to: LatLng }[];
+  /**
+   * Where the route actually meets each stop (the road the router snapped
+   * it to): the start of each leg, then the finish.
+   */
+  stopsAt?: LatLng[];
 }
 
 /** The parts of a Valhalla /route response we use. */
@@ -227,10 +232,12 @@ export function toResult(trip: ValhallaTrip, label: string, detours: LatLng[]): 
   const path = legPaths.flatMap((p, i) => p.slice(i ? 1 : 0));
   // Where each leg starts in the joined path, for placing its manoeuvres.
   const offsets = legPaths.map((_, i) => legPaths.slice(0, i).reduce((n, p) => n + p.length - 1, 0));
+  const stopsAt = legPaths.length ? [...legPaths.map((p) => p[0]), legPaths[legPaths.length - 1][legPaths[legPaths.length - 1].length - 1]] : [];
   return {
     id: Math.random().toString(36).slice(2),
     label,
     path,
+    stopsAt,
     distance: trip.summary.length * 1000,
     duration: trip.summary.time,
     curviness: curviness(path),
@@ -569,6 +576,36 @@ export async function routeVia(
   };
 }
 
+/** How far a tapped or dragged pin may jump to reach a road. */
+const SNAP_REACH_M = 1000;
+
+/**
+ * The nearest point on a rideable road to `p` (the route server's
+ * locate), for pins the rider puts down by hand. Returns `p` unchanged if
+ * there's no road within reach or the server doesn't answer quickly.
+ */
+export async function snapToRoad(p: LatLng, opts: RouteOptions, signal?: AbortSignal): Promise<LatLng> {
+  try {
+    const timeout = AbortSignal.timeout(5000);
+    const res = await routerFetch(
+      "/locate",
+      { locations: [{ lat: p.lat, lon: p.lng }], costing: costing(opts).costing, verbose: false },
+      signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeout]) : (signal ?? timeout),
+    );
+    if (!res.ok) return p;
+    const json = (await res.json()) as { edges?: { correlated_lat: number; correlated_lon: number }[] }[];
+    let best: LatLng | null = null;
+    for (const e of json?.[0]?.edges ?? []) {
+      const q = { lat: e.correlated_lat, lng: e.correlated_lon };
+      if (Number.isFinite(q.lat) && Number.isFinite(q.lng) && (!best || distance(p, q) < distance(p, best))) best = q;
+    }
+    return best && distance(p, best) <= SNAP_REACH_M ? best : p;
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    return p;
+  }
+}
+
 /**
  * Speed limits along a route, in km/h per path point (null where the map
  * has none), from Valhalla's trace_attributes on the route's own geometry.
@@ -708,5 +745,7 @@ export function joinSections(sections: RouteResult[]): RouteResult {
     steps,
     detours: sections.flatMap((r) => r.detours),
     warnings: [...new Set(sections.flatMap((r) => r.warnings))],
+    // Each section ends where the next starts.
+    stopsAt: sections.flatMap((r, i) => (i ? (r.stopsAt ?? []).slice(1) : (r.stopsAt ?? []))),
   };
 }
