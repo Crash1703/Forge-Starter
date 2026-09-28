@@ -146,7 +146,6 @@ input[type="search"], input:not([type]), .save input, .card input {
 .result { position: relative; display: grid; gap: 12px; }
 .progress { position: absolute; top: 0; left: 0; height: 3px; width: 40%; background: var(--accent); animation: slide 1s ease-in-out infinite; }
 @keyframes slide { from { left: -40%; } to { left: 100%; } }
-.refining { margin: 0 0 6px; font-size: 0.85rem; color: var(--muted); }
 .alternatives { display: grid; gap: 6px; }
 .alternatives button { display: grid; grid-template-columns: 1fr auto; text-align: left; gap: 2px 8px; padding: 8px 10px; }
 .alternatives button span:first-of-type { color: var(--muted); font-size: 0.85rem; }
