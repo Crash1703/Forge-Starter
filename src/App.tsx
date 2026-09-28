@@ -237,6 +237,7 @@ export default function App() {
       return;
     }
     const ctrl = new AbortController();
+    let replanning = false;
     const t = window.setTimeout(() => {
       setBusy(true);
       const ride = ridePath(stops, options.returnToStart);
@@ -250,12 +251,25 @@ export default function App() {
           // Generated loop points are arbitrary, so any road within 1 km will do;
           // the rider's own pins may snap to a road within 75 m.
           radius: between ? (s.auto ? 1000 : 75) : undefined,
+          movable: between && s.auto,
         };
       });
       // Sections with their own style are planned one at a time and joined.
       const styles = ride.slice(0, -1).map((s) => s.legStyle);
       (styles.some(Boolean) ? planSections(points, styles, options, ctrl.signal) : planRoute(points, options, ctrl.signal))
         .then((r) => {
+          // A generated loop point the route has to ride up a dead end to
+          // reach: move it to the foot of that road and plan again. Moved
+          // points count as placed, so this happens once per point.
+          const moves = r[0]?.moves ?? [];
+          if (moves.length) {
+            const to = new Map(moves.map((m) => [ride[m.stop].id, m.to]));
+            setStops((ss) => ss.map((s) => (to.has(s.id) ? { ...s, position: to.get(s.id)!, auto: false } : s)));
+            moves.forEach((m) => labelStop(ride[m.stop].id, m.to));
+            flash(moves.length === 1 ? "Moved a loop point off a dead end" : `Moved ${moves.length} loop points off dead ends`);
+            replanning = true;
+            return;
+          }
           setRoutes(r);
           setSnap((s) => (s === "peek" ? "half" : s));
           setSelected(0);
@@ -268,7 +282,7 @@ export default function App() {
         .catch((e: Error) => {
           if (e.name !== "AbortError") setError(e.message);
         })
-        .finally(() => !ctrl.signal.aborted && setBusy(false));
+        .finally(() => !ctrl.signal.aborted && !replanning && setBusy(false));
     }, 350);
     return () => {
       clearTimeout(t);

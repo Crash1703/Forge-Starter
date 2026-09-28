@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { destination } from "../geo";
+import { destination, distance } from "../geo";
 import { costing, defaultOptions, planRoute, planSections, spurWarning, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
 
 /** Encode points as a precision-6 polyline, the format Valhalla returns. */
@@ -167,6 +167,29 @@ describe("twisty helper points", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ trip }), { status: 200 })));
     const [r] = await planRoute([{ pos: start }, { pos: tip }, { pos: end }], defaultOptions);
     expect(r.warnings).toEqual([spurWarning(1)]);
+  });
+
+  it("snaps generated points to proper roads and says where to move one stuck up a dead end", async () => {
+    const tip = destination(start, 90, 8000);
+    const foot = destination(tip, 180, 500);
+    const trip = tripAlong([start, foot, tip, foot, end], 21);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ trip }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const [r] = await planRoute([{ pos: start }, { pos: tip, movable: true }, { pos: end }], defaultOptions);
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.locations[1].search_filter).toEqual({ min_road_class: "unclassified" });
+    expect(body.locations[0].search_filter).toBeUndefined();
+    expect(r.moves).toHaveLength(1);
+    expect(r.moves![0].stop).toBe(1);
+    expect(distance(r.moves![0].to, foot)).toBeLessThan(40);
+  });
+
+  it("doesn't move the rider's own pins", async () => {
+    const tip = destination(start, 90, 8000);
+    const foot = destination(tip, 180, 500);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ trip: tripAlong([start, foot, tip, foot, end], 21) }), { status: 200 })));
+    const [r] = await planRoute([{ pos: start }, { pos: tip }, { pos: end }], defaultOptions);
+    expect(r.moves).toBeUndefined();
   });
 });
 

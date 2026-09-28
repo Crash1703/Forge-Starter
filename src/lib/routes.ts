@@ -1,4 +1,4 @@
-import { avoidPoints, curviness, distance, midpointOffset, outAndBack, sharedRoad, type LatLng } from "./geo";
+import { avoidPoints, curviness, distance, midpointOffset, outAndBack, sharedRoad, spurBase, type LatLng } from "./geo";
 import { decodePolyline } from "./polyline";
 import { VALHALLA_URL } from "./config";
 
@@ -55,6 +55,11 @@ export interface RouteResult {
   /** Extra via points the planner added to find a curvier line. */
   detours: LatLng[];
   warnings: string[];
+  /**
+   * Movable stops the route rides up a dead end to reach, with the junction
+   * at the foot of that dead end: move the stop there and re-plan.
+   */
+  moves?: { stop: number; to: LatLng }[];
 }
 
 /** The parts of a Valhalla /route response we use. */
@@ -123,6 +128,13 @@ export interface RoutePoint {
   radius?: number;
   /** Direction of travel here (degrees), so the router doesn't start you off with a U-turn. */
   heading?: number;
+  /**
+   * A point the app placed (a generated loop point), not the rider. It snaps
+   * only to proper roads, not residential streets or service roads, and if
+   * the route still has to ride up a dead end and back to reach it, the
+   * result suggests where to move it (see `RouteResult.moves`).
+   */
+  movable?: boolean;
 }
 
 /** Twisty's helper points only pull the route sideways; any road nearby will do. */
@@ -166,6 +178,8 @@ async function computeRoutes(
       type: locationType(p),
       ...(p.radius ? { radius: Math.round(p.radius) } : {}),
       ...(p.heading != null ? { heading: Math.round(p.heading), heading_tolerance: 60 } : {}),
+      // Generated points: skip residential streets and service roads, where cul-de-sacs are.
+      ...(p.movable ? { search_filter: { min_road_class: "unclassified" } } : {}),
     })),
     ...costing(opts),
     ...(alternatives && points.length === 2 ? { alternates: 2 } : {}),
@@ -291,6 +305,12 @@ async function untangleLoop(
   return { summary: { length: sum((l) => l.summary.length), time: sum((l) => l.summary.time) }, legs };
 }
 
+/** Where the route actually reached stop `n` (its road, which may be some way from the pin). */
+function reachedStop(r: RouteResult, n: number): LatLng | null {
+  const step = r.steps.find((st) => st.type === STOP_TYPE && st.instruction === `Stop ${n}`);
+  return step ? r.path[step.at] : null;
+}
+
 /**
  * Plan a route through `points`, in order.
  *
@@ -359,7 +379,14 @@ export async function planRoute(
     const spurs = points
       .slice(1, -1)
       .flatMap((p, i) => (outAndBack(r.path, p.pos) > SPUR_METRES ? [spurWarning(i + 1)] : []));
-    return { ...r, warnings: spurs.length ? spurs : turnsAround ? [UTURN_WARNING] : [] };
+    const moves = points.slice(1, -1).flatMap((p, i) => {
+      if (!p.movable) return [];
+      const tip = reachedStop(r, i + 1) ?? p.pos;
+      if (outAndBack(r.path, tip) <= SPUR_METRES) return [];
+      const to = spurBase(r.path, tip);
+      return to ? [{ stop: i + 1, to }] : [];
+    });
+    return { ...r, warnings: spurs.length ? spurs : turnsAround ? [UTURN_WARNING] : [], ...(moves.length ? { moves } : {}) };
   };
   const results = baseRoutes.map((r, i) => withWarnings(toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, [])));
 
