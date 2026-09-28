@@ -6,6 +6,7 @@ import TwistGauge from "./components/TwistGauge";
 import RideView from "./components/RideView";
 import RidesPanel from "./components/RidesPanel";
 import Icon, { type IconName } from "./components/Icon";
+import StopList from "./components/StopList";
 import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
 import { MAX_SPAN, SIGHT_ICONS, SIGHT_NAMES, sightsIn, type Bounds, type Sight } from "./lib/sights";
 import WeatherStrip from "./components/WeatherStrip";
@@ -122,6 +123,8 @@ export default function App() {
   const [layersOpen, setLayersOpen] = useState(false);
   const [home, setHomeState] = useState<Home | null>(loadHome);
   const [menu, setMenu] = useState<"avoid" | "more" | null>(null);
+  /** Where the next searched place goes in the stop list (from a leg's +). */
+  const [insertAt, setInsertAt] = useState<number | null>(null);
   const [sights, setSights] = useState<Sight[]>([]);
   const [sightsNote, setSightsNote] = useState("");
   const [sight, setSight] = useState<Sight | null>(null);
@@ -142,7 +145,6 @@ export default function App() {
   const [rideLayer, setRideLayer] = useState<RideLayer | null>(null);
   const [followBreaks, setFollowBreaks] = useState(0);
   const wantFit = useRef(!!shared);
-  const dragFrom = useRef<number | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const route = routes[selected];
@@ -898,75 +900,59 @@ export default function App() {
         {tab === "plan" ? (
           <div className="scroll">
             <section>
-              <div onFocusCapture={() => setSnap("full")} data-peek={route ? undefined : ""}>
-              <PlaceSearch
-                near={stops[stops.length - 1]?.position ?? center}
-                placeholder={stops.length ? "Add a stop or destination" : "Search for a start point"}
-                onPick={(label, p) => {
-                  addStop(p, label);
-                  setSnap("half");
-                }}
-              />
+              <div className="plan-search" onFocusCapture={() => setSnap("full")} data-peek={route ? undefined : ""}>
+                <PlaceSearch
+                  near={(insertAt != null ? stops[insertAt - 1] : stops[stops.length - 1])?.position ?? center}
+                  placeholder={
+                    insertAt != null && stops[insertAt - 1]
+                      ? `Add a stop after ${stops[insertAt - 1].label}`
+                      : stops.length
+                        ? "Add a stop or destination"
+                        : "Search for a start point"
+                  }
+                  onPick={(label, p) => {
+                    addStop(p, label, insertAt ?? undefined);
+                    setInsertAt(null);
+                    setSnap("half");
+                  }}
+                />
+                {insertAt != null && (
+                  <button className="link" onClick={() => setInsertAt(null)}>
+                    Add at the end instead
+                  </button>
+                )}
               </div>
               <p className="hint">Or tap the map to add stops. Tap the route line to add a stop there, and drag pins to adjust.</p>
 
-              {stops.length > 0 && (
-                <ol className="stops">
-                  {stops.map((s, i) => (
-                    <li
-                      key={s.id}
-                      draggable
-                      onDragStart={() => (dragFrom.current = i)}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={() => {
-                        if (dragFrom.current != null) reorder(dragFrom.current, i);
-                        dragFrom.current = null;
-                      }}
-                    >
-                      <StopBadge index={i} count={stops.length} loop={options.returnToStart} />
-                      <span className="label" title={s.label}>
-                        {s.label}
-                      </span>
-                      {(i < stops.length - 1 || (options.returnToStart && stops.length > 1)) && (
-                        <select
-                          className="leg-style"
-                          aria-label={`Ride style from ${s.label} to the next stop`}
-                          value={s.legStyle ?? ""}
-                          onChange={(e) =>
-                            setStops((ss) =>
-                              ss.map((x) => (x.id === s.id ? { ...x, legStyle: (e.target.value || undefined) as RouteStyle | undefined } : x)),
-                            )
-                          }
-                        >
-                          <option value="">↓ {STYLES.find((x) => x.id === options.style)?.name}</option>
-                          {STYLES.map((x) => (
-                            <option key={x.id} value={x.id}>
-                              ↓ {x.name}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                      <span className="row-actions">
-                        <button aria-label="Move up" disabled={i === 0} onClick={() => reorder(i, i - 1)}>
-                          ↑
-                        </button>
-                        <button aria-label="Move down" disabled={i === stops.length - 1} onClick={() => reorder(i, i + 1)}>
-                          ↓
-                        </button>
-                        <button aria-label="Remove stop" onClick={() => removeStop(s.id)}>
-                          ✕
-                        </button>
-                      </span>
-                    </li>
-                  ))}
-                  {options.returnToStart && stops.length > 1 && (
-                    <li className="finish-row">
-                      <span className="badge start">A</span>
-                      <span className="label">Back to {stops[0].label}</span>
-                    </li>
-                  )}
-                </ol>
-              )}
+              <StopList
+                stops={stops}
+                loop={options.returnToStart}
+                styles={STYLES}
+                routeStyle={options.style}
+                legs={route && !busy && route.legs.length === (options.returnToStart ? stops.length : stops.length - 1) ? route.legs : null}
+                onReorder={reorder}
+                onRemove={removeStop}
+                onLegStyle={(id, st) => setStops((ss) => ss.map((x) => (x.id === id ? { ...x, legStyle: st } : x)))}
+                onInsert={(at) => {
+                  setInsertAt(at);
+                  setSnap("full");
+                  requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".plan-search input")?.focus());
+                }}
+                onShow={(st) => {
+                  setSnap("peek");
+                  mapRef.current?.easeTo({ center: [st.position.lng, st.position.lat], zoom: Math.max(mapRef.current.getZoom(), 14) });
+                }}
+                onSetDestination={(id) => {
+                  setStops((ss) => [...ss.filter((x) => x.id !== id), ...ss.filter((x) => x.id === id)]);
+                  setOpt("returnToStart", false);
+                }}
+                onMenuOpen={() => setSnap("full")}
+                onRoundTrip={(st) => {
+                  setStops((ss) => [st, ...ss.filter((x) => x.id !== st.id)]);
+                  setLoopStart("first");
+                  setLoopScreen(true);
+                }}
+              />
 
               {stops.length > 1 && (
                 <label className="check loop-toggle">
@@ -1488,11 +1474,6 @@ export default function App() {
   );
 }
 
-/** A for the start, B for the finish, numbers in between. On a loop A is also the finish. */
-function StopBadge({ index, count, loop }: { index: number; count: number; loop: boolean }) {
-  const kind = index === 0 ? "start" : index === count - 1 && !loop ? "end" : "via";
-  return <span className={`badge ${kind}`}>{kind === "start" ? "A" : kind === "end" ? "B" : index}</span>;
-}
 
 /** 1:05:09 or 5:09 */
 function formatClock(seconds: number): string {
