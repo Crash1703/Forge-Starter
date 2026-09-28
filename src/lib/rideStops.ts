@@ -1,5 +1,5 @@
 import { distance, pathLength, resample, type LatLng } from "./geo";
-import { OVERPASS_URL } from "./config";
+import { overpass, type OverpassElement } from "./overpass";
 
 export type RidePlaceKind = "fuel" | "food" | "lookout" | "toilets";
 
@@ -33,14 +33,6 @@ const NEAR_ROUTE = 1000;
 const LOOK_AHEAD = 60_000;
 const AROUND_RIDER = 3000;
 
-interface OverpassElement {
-  type: string;
-  id: number;
-  lat?: number;
-  lon?: number;
-  center?: { lat: number; lon: number };
-  tags?: Record<string, string>;
-}
 
 /** The first `metres` of a path. */
 export function firstStretch(path: LatLng[], metres: number): LatLng[] {
@@ -53,13 +45,39 @@ export function firstStretch(path: LatLng[], metres: number): LatLng[] {
   return out;
 }
 
+/**
+ * Small boxes covering the road ahead, ~10 km of it each, with a margin of
+ * NEAR_ROUTE. A few boxes are far quicker for the server than a search
+ * along a long line; what's in a box corner but away from the road is
+ * dropped afterwards.
+ */
+export function boxesAlong(line: LatLng[], chunk = 10_000): [number, number, number, number][] {
+  const boxes: [number, number, number, number][] = [];
+  let start = 0;
+  let done = 0;
+  for (let i = 1; i <= line.length; i++) {
+    if (i < line.length) done += distance(line[i - 1], line[i]);
+    if (i === line.length || done >= chunk) {
+      const part = line.slice(start, Math.min(i + 1, line.length));
+      const lat = part.map((p) => p.lat);
+      const lng = part.map((p) => p.lng);
+      const padLat = NEAR_ROUTE / 110_540;
+      const padLng = NEAR_ROUTE / (111_320 * Math.cos((lat[0] * Math.PI) / 180));
+      boxes.push([Math.min(...lat) - padLat, Math.min(...lng) - padLng, Math.max(...lat) + padLat, Math.max(...lng) + padLng]);
+      start = i;
+      done = 0;
+    }
+  }
+  return boxes;
+}
+
 export function placesQuery(kind: RidePlaceKind, line: LatLng[], from: LatLng): string {
-  const coords = line.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join(",");
+  const boxes = line.length > 1 ? boxesAlong(line) : [];
   const parts = FILTERS[kind].flatMap((f) => [
-    ...(line.length > 1 ? [`nwr${f}(around:${NEAR_ROUTE},${coords});`] : []),
+    ...boxes.map((b) => `nwr${f}(${b.map((v) => v.toFixed(4)).join(",")});`),
     `nwr${f}(around:${AROUND_RIDER},${from.lat.toFixed(5)},${from.lng.toFixed(5)});`,
   ]);
-  return `[out:json][timeout:20];(${parts.join("")});out center tags 200;`;
+  return `[out:json][timeout:15];(${parts.join("")});out center tags 400;`;
 }
 
 /**
@@ -89,13 +107,16 @@ export function rankPlaces(elements: OverpassElement[], kind: RidePlaceKind, lin
         bestD = d;
       }
     }
+    const away = distance(from, position);
+    // In a box's corner, well away from the road and from the rider.
+    if (best < 0 && away > AROUND_RIDER * 1.1) continue;
     const tags = e.tags ?? {};
     out.push({
       id,
       name: tags.name || tags.brand || tags.operator || fallback,
       position,
       ahead: best >= 0 ? cum[best] : null,
-      away: distance(from, position),
+      away,
     });
   }
   return out
@@ -107,13 +128,5 @@ export function rankPlaces(elements: OverpassElement[], kind: RidePlaceKind, lin
 export async function placesAhead(kind: RidePlaceKind, ahead: LatLng[], from: LatLng, signal?: AbortSignal): Promise<RidePlace[]> {
   const stretch = firstStretch(ahead, LOOK_AHEAD);
   const line = resample(stretch, Math.max(500, pathLength(stretch) / 120));
-  const res = await fetch(OVERPASS_URL, {
-    method: "POST",
-    signal,
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `data=${encodeURIComponent(placesQuery(kind, line, from))}`,
-  });
-  if (!res.ok) throw new Error(res.status === 429 ? "The map data server is busy. Try again in a minute." : "Couldn't look up places");
-  const json: { elements?: OverpassElement[] } = await res.json();
-  return rankPlaces(json.elements ?? [], kind, line, from);
+  return rankPlaces(await overpass(placesQuery(kind, line, from), signal), kind, line, from);
 }

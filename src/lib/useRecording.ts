@@ -8,8 +8,10 @@ import { newId } from "./storage";
 export interface RecordingState {
   startedAt: number;
   distance: number; // m
-  elapsed: number; // s, wall clock
+  elapsed: number; // s, wall clock, not counting pauses
   name?: string;
+  /** Paused: positions aren't recorded until resumed. */
+  paused?: boolean;
 }
 
 /** Rides shorter than this aren't worth keeping (a test tap, a trip to the letterbox). */
@@ -33,6 +35,8 @@ export function useRecording(onSaved: (ride: RideRecord) => void) {
   const name = useRef<string | undefined>(undefined);
   const stopGps = useRef<Stop | null>(null);
   const timers = useRef<number[]>([]);
+  const paused = useRef<number | null>(null); // when the current pause began
+  const pausedFor = useRef(0); // ms of earlier pauses
   const savedCb = useRef(onSaved);
   savedCb.current = onSaved;
 
@@ -52,12 +56,35 @@ export function useRecording(onSaved: (ride: RideRecord) => void) {
     const r = new Recorder(Date.now());
     rec.current = r;
     name.current = rideName;
-    const update = () => setState({ startedAt: r.startedAt, distance: r.distance, elapsed: (Date.now() - r.startedAt) / 1000, name: rideName });
+    paused.current = null;
+    pausedFor.current = 0;
+    const update = () => {
+      const now = paused.current ?? Date.now();
+      setState({
+        startedAt: r.startedAt,
+        distance: r.distance,
+        elapsed: (now - r.startedAt - pausedFor.current) / 1000,
+        name: rideName,
+        paused: paused.current != null,
+      });
+    };
     update();
     stopGps.current = subscribeGps((f) => {
-      if (r.add(f)) update();
+      if (paused.current == null && r.add(f)) update();
     });
     timers.current = [window.setInterval(update, 1000), window.setInterval(writeDraft, 15_000)];
+  }, []);
+
+  /** Hold recording (a café stop), or carry on. */
+  const pause = useCallback((on: boolean) => {
+    if (!rec.current) return;
+    if (on && paused.current == null) paused.current = Date.now();
+    if (!on && paused.current != null) {
+      pausedFor.current += Date.now() - paused.current;
+      paused.current = null;
+    }
+    setState((s) => (s ? { ...s, paused: on } : s));
+    writeDraft();
   }, []);
 
   const stop = useCallback(async (save: boolean): Promise<RideRecord | null> => {
@@ -98,5 +125,5 @@ export function useRecording(onSaved: (ride: RideRecord) => void) {
     return () => document.removeEventListener("visibilitychange", onHide);
   }, []);
 
-  return { state, start, stop, unfinished, keepUnfinished, discardUnfinished, minMetres: MIN_METRES };
+  return { state, start, stop, pause, unfinished, keepUnfinished, discardUnfinished, minMetres: MIN_METRES };
 }

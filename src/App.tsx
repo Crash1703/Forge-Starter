@@ -740,6 +740,7 @@ export default function App() {
           simulate={riding.simulate}
           followBreaks={followBreaks}
           onLayer={setRideLayer}
+          onPause={(on) => recording.pause(on)}
           onExit={() => {
             setRiding(null);
             setRideLayer(null);
@@ -1427,8 +1428,9 @@ export default function App() {
         </div>
         )}
         {recording.state && (
-          <div className={`rec-pill${riding ? " riding" : ""}`} role="status">
-            <span className="rec-dot" aria-hidden /> REC {formatClock(recording.state.elapsed)} · {formatDistance(recording.state.distance)}
+          <div className={`rec-pill${riding ? " riding" : ""}${recording.state.paused ? " paused" : ""}`} role="status">
+            <span className="rec-dot" aria-hidden /> {recording.state.paused ? "PAUSED" : "REC"} {formatClock(recording.state.elapsed)} ·{" "}
+            {formatDistance(recording.state.distance)}
           </div>
         )}
         {confirmStop && recording.state && (

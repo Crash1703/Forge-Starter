@@ -1,5 +1,5 @@
 import { distance, pathLength, resample, type LatLng } from "./geo";
-import { OVERPASS_URL } from "./config";
+import { overpass, type OverpassElement } from "./overpass";
 
 export type PoiKind = "fuel" | "cafe";
 
@@ -12,14 +12,6 @@ export interface Poi {
   at: number; // metres along the route
 }
 
-interface OverpassElement {
-  type: string;
-  id: number;
-  lat?: number;
-  lon?: number;
-  center?: { lat: number; lon: number };
-  tags?: Record<string, string>;
-}
 
 /**
  * Fuel stations (within 300 m) and cafés and bakeries (within 200 m) along a
@@ -35,15 +27,7 @@ nwr["amenity"="fuel"](around:300,${coords});
 nwr["amenity"="cafe"](around:200,${coords});
 nwr["shop"="bakery"](around:200,${coords});
 );out center tags;`;
-  const res = await fetch(OVERPASS_URL, {
-    method: "POST",
-    signal,
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `data=${encodeURIComponent(query)}`,
-  });
-  if (!res.ok) throw new Error(res.status === 429 ? "The map data server is busy. Try again in a minute." : "Couldn't look up stops");
-  const json: { elements?: OverpassElement[] } = await res.json();
-  return placeAlong(json.elements ?? [], line);
+  return placeAlong(await overpass(query, signal), line);
 }
 
 /** Turn Overpass elements into stops, each placed at its distance along the route. */

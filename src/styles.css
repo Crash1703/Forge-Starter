@@ -419,3 +419,13 @@ a.button { display: inline-flex; align-items: center; padding: 8px 12px; border:
 .ride-add-actions { display: grid; gap: 8px; }
 .ride-add-actions button { min-height: 52px; border-radius: 14px; border: none; background: #2a3039; color: var(--ride-text); font-weight: 700; font-size: 1rem; }
 .ride-add-actions button.primary { background: var(--accent); color: var(--accent-ink); }
+.ride-add-retry { min-height: 48px; border-radius: 12px; border: none; background: #2a3039; color: var(--ride-text); font-weight: 700; }
+
+/* Ride mode: pause */
+.ride-pause { position: absolute; right: 0; top: calc(100% + 64px); box-shadow: 0 6px 20px rgb(0 0 0 / 0.35); pointer-events: auto; }
+.ride-pause[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.ride-paused { pointer-events: auto; position: absolute; left: 10px; right: 10px; top: 50%; transform: translateY(-50%); max-width: 420px; margin: 0 auto; display: grid; gap: 8px; text-align: center; background: var(--ride-bg); color: var(--ride-text); border-radius: 18px; padding: 18px 16px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.4); }
+.ride-paused strong { font-size: 1.4rem; }
+.ride-paused span { color: var(--ride-muted); }
+.ride-paused button { min-height: 56px; border-radius: 28px; border: none; font-size: 1.15rem; font-weight: 700; background: var(--accent); color: var(--accent-ink); margin-top: 6px; }
+.rec-pill.paused .rec-dot { animation: none; opacity: 0.5; }

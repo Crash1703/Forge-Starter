@@ -26,22 +26,29 @@ export default function RideAddStop({ from, ahead, onAdd, onClose }: Props) {
   const [note, setNote] = useState("");
   const [picked, setPicked] = useState<{ name: string; position: LatLng; where: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (!kind) return;
     const ctrl = new AbortController();
     setPlaces(null);
+    setFailed(false);
     setNote("Looking along the road ahead…");
     placesAhead(kind, ahead, from, ctrl.signal)
       .then((found) => {
         setPlaces(found);
         setNote(found.length ? "" : "Nothing found near the road ahead.");
       })
-      .catch((e: Error) => e.name !== "AbortError" && setNote(e.message));
+      .catch((e: Error) => {
+        if (e.name === "AbortError") return;
+        setNote(e.message);
+        setFailed(true);
+      });
     return () => ctrl.abort();
-    // Look once per choice; the rider keeps moving but the list stays put.
+    // Look once per choice (or retry); the rider keeps moving but the list stays put.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind]);
+  }, [kind, attempt]);
 
   const where = (p: RidePlace) => (p.ahead != null ? `${formatDistance(p.ahead)} ahead` : `${formatDistance(p.away)} away`);
 
@@ -90,12 +97,22 @@ export default function RideAddStop({ from, ahead, onAdd, onClose }: Props) {
           />
           <div className="ride-add-kinds" role="radiogroup" aria-label="Find along the road ahead">
             {RIDE_PLACE_KINDS.map((k) => (
-              <button key={k.kind} role="radio" aria-checked={kind === k.kind} onClick={() => setKind(k.kind)}>
+              <button
+                key={k.kind}
+                role="radio"
+                aria-checked={kind === k.kind}
+                onClick={() => (kind === k.kind ? setAttempt((a) => a + 1) : setKind(k.kind))}
+              >
                 <span aria-hidden>{k.icon}</span> {k.name}
               </button>
             ))}
           </div>
           {note && <p className="ride-add-note">{note}</p>}
+          {failed && (
+            <button className="ride-add-retry" onClick={() => setAttempt((a) => a + 1)}>
+              ↻ Try again
+            </button>
+          )}
           {places && places.length > 0 && (
             <ol className="ride-add-list">
               {places.map((p) => (
