@@ -9,7 +9,7 @@ import {
   formatDuration,
   midpointOffset,
   outAndBack,
-  spurBase,
+  findSpurs,
   loopThrough,
   sharedRoad,
   countBends,
@@ -137,12 +137,24 @@ describe("outAndBack", () => {
     expect(outAndBack(path, tip)).toBeGreaterThan(500);
   });
 
-  it("finds the foot of the spur", () => {
-    const path = [origin, junction, tip, junction, east(junction, 2000)];
-    const base = spurBase(path, destination(tip, 90, 50));
-    expect(base).not.toBeNull();
-    expect(distance(base!, junction)).toBeLessThan(40);
-    expect(spurBase([origin, junction, east(junction, 2000)], tip)).toBeNull();
+  it("lists every spur along a route, with its foot", () => {
+    const tip2 = destination(east(junction, 1500), 180, 900);
+    const path = [origin, junction, tip, junction, east(junction, 1500), tip2, east(junction, 1500), east(junction, 3000)];
+    const spurs = findSpurs(path);
+    expect(spurs).toHaveLength(2);
+    expect(distance(spurs[0].base, junction)).toBeLessThan(60);
+    expect(distance(spurs[0].tip, tip)).toBeLessThan(60);
+    expect(spurs[0].length).toBeGreaterThan(500);
+    expect(distance(spurs[1].base, east(junction, 1500))).toBeLessThan(60);
+    expect(findSpurs([origin, junction, east(junction, 2000), destination(east(junction, 2000), 0, 800), tip])).toEqual([]);
+  });
+
+  it("finds a spur with a turning circle at the end", () => {
+    const circle: LatLng[] = [];
+    for (let a = 180; a <= 540; a += 30) circle.push(destination(destination(tip, 0, 25), a, 25));
+    const spurs = findSpurs([origin, junction, tip, ...circle, tip, junction, east(junction, 2000)]);
+    expect(spurs).toHaveLength(1);
+    expect(distance(spurs[0].base, junction)).toBeLessThan(60);
   });
 
   it("catches a spur that ends in a turning circle", () => {

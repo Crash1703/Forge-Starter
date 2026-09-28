@@ -220,43 +220,64 @@ export function outAndBack(path: LatLng[], near: LatLng, window = 5000, toleranc
 }
 
 /**
- * Where a dead-end spur near `near` leaves the rest of the route: the junction
- * the route rides up from and comes back to. Null if the route doesn't ride
- * up and back near `near`. Moving a loosely placed pin here keeps the loop's
- * shape without the detour.
+ * Every dead-end spur along `path`: a stretch ridden out and straight back
+ * along the same road. `tip` is the far end, `base` the junction it leaves
+ * from, `length` how far up it goes (metres, one way). Turning circles and
+ * small loops at the end are allowed for.
  */
-export function spurBase(path: LatLng[], near: LatLng, tolerance = 20): LatLng | null {
+export function findSpurs(path: LatLng[], minLength = 100, tolerance = 25): { tip: LatLng; base: LatLng; length: number }[] {
   const step = 20;
-  const minGap = 5;
   const pts = resample(path, step);
-  if (pts.length < minGap + 1) return null;
-  let mid = 0;
-  for (let i = 1; i < pts.length; i++) if (distance(pts[i], near) < distance(pts[mid], near)) mid = i;
-  const kx = 111320 * Math.cos(rad(pts[mid].lat));
+  const n = pts.length;
+  if (n < 12) return [];
+  const kx = 111320 * Math.cos(rad(pts[Math.floor(n / 2)].lat));
   const ky = 110540;
   const tol2 = tolerance * tolerance;
-  const to = Math.min(pts.length - 1, mid + 250); // 5 km on
-  // Ridden again later, on the way back out of the spur.
-  const again = (i: number) => {
-    for (let j = Math.max(i + minGap, mid); j <= to; j++) {
-      const dx = (pts[j].lng - pts[i].lng) * kx;
-      const dy = (pts[j].lat - pts[i].lat) * ky;
-      if (dx * dx + dy * dy < tol2) return true;
-    }
-    return false;
+  const near = (a: LatLng, b: LatLng) => {
+    const dx = (a.lng - b.lng) * kx;
+    const dy = (a.lat - b.lat) * ky;
+    return dx * dx + dy * dy < tol2;
   };
-  // Walk back from the tip: past any turning circle, then down the spur
-  // (allowing short gaps where the two passes drift apart) to its foot.
-  let base = -1;
-  let gap = 0;
-  for (let i = mid; i >= 0 && mid - i <= 250; i--) {
-    if (again(i)) {
-      base = i;
-      gap = 0;
-    } else if (base >= 0 && ++gap > 3) break;
-    else if (base < 0 && mid - i > 10) return null;
+  // Is pts[i] ridden again around index j, after the turn-around at t (the
+  // passes drift a little apart)?
+  const back = (i: number, j: number, t: number) => {
+    for (let k = Math.max(t + 1, j - 3); k <= Math.min(n - 1, j + 3); k++) if (k - i >= 5 && near(pts[i], pts[k])) return k;
+    return -1;
+  };
+  const out: { tip: LatLng; base: LatLng; length: number }[] = [];
+  for (let t = 5; t < n - 5; t++) {
+    // Try each place as the turn-around, allowing up to ~200 m of turning
+    // circle or loop at the end before the two passes line up.
+    let best: { up: number; down: number } | null = null;
+    for (let slack = 0; slack <= 10 && !best; slack++) {
+      let i = t - 3;
+      let j = t + 3 + slack;
+      if (i < 0 || j >= n || back(i, j, t) < 0) continue;
+      let gap = 0;
+      let up = i;
+      let down = j;
+      while (i > 0 && j < n - 1 && gap <= 3) {
+        i--;
+        j++;
+        const k = back(i, j, t);
+        if (k >= 0) {
+          up = i;
+          down = Math.max(down, k);
+          j = Math.max(j, k);
+          gap = 0;
+        } else gap++;
+      }
+      if ((t - up) * step >= minLength) best = { up, down };
+    }
+    if (best) {
+      // The turn-around is the point of the spur furthest along it from the foot.
+      let far = t;
+      for (let k = best.up; k <= best.down; k++) if (distance(pts[k], pts[best.up]) > distance(pts[far], pts[best.up])) far = k;
+      out.push({ tip: pts[far], base: pts[best.up], length: (best.down - best.up) * step / 2 });
+      t = Math.max(t, best.down); // carry on after the spur
+    }
   }
-  return base >= 0 && (mid - base) * step >= 100 ? pts[base] : null;
+  return out;
 }
 
 /** A 0–10 twistiness score from degrees of turning per km (the "Calimeter" idea). */
