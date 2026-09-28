@@ -1,4 +1,4 @@
-import { avoidPoints, crossings, curviness, distance, findSpurs, midpointOffset, outAndBack, sharedRoad, type LatLng } from "./geo";
+import { avoidPoints, centroid, crossings, curviness, distance, findSpurs, midpointOffset, outAndBack, sharedRoad, type LatLng } from "./geo";
 import { decodePolyline } from "./polyline";
 import { requestsAtOnce, routerFetch } from "./routeServer";
 
@@ -399,8 +399,14 @@ export async function planRoute(
   signal?: AbortSignal,
   /** Roads to stay off (used when planning a loop one section at a time). */
   avoid: LatLng[] = [],
+  /**
+   * The middle of the loop this route is part of: detours for twistier
+   * roads only go outwards from it, never across the loop's middle.
+   */
+  loopCentre?: LatLng,
 ): Promise<RouteResult[]> {
   const stops = points.map((p) => p.pos);
+  const centre = loopCentre ?? (opts.returnToStart ? centroid(stops) : undefined);
   if (stops.length > MAX_STOPS) throw new RoutingError(`A route can have at most ${MAX_STOPS} stops.`);
   let base: Waypoint[] = points.map((p, i) => ({ ...p, via: !!p.via && i > 0 && i < points.length - 1 }));
   const numbers = stopNumbers(base);
@@ -482,7 +488,11 @@ export async function planRoute(
     const a = stops[leg];
     const b = stops[leg + 1];
     if (distance(a, b) > 5000) {
-      const variants = [0.2, -0.2, 0.35, -0.35].map((f) => midpointOffset(a, b, f));
+      const middle = midpointOffset(a, b, 0);
+      // On a loop, a detour into the middle would make it cross itself.
+      const variants = [0.2, -0.2, 0.35, -0.35]
+        .map((f) => midpointOffset(a, b, f))
+        .filter((p) => !centre || distance(p, centre) > distance(middle, centre));
       const tryDetour = async (detour: LatLng): Promise<RouteResult | null> => {
         const pts = [...base.slice(0, leg + 1), { pos: detour, via: true, radius: HELPER_RADIUS }, ...base.slice(leg + 1)];
         try {
@@ -635,19 +645,27 @@ export async function planSections(
   const sections: RouteResult[] = [];
   // One section per pair of numbered stops, with any shaping points between them.
   const breaks = points.flatMap((p, i) => (i === 0 || i === points.length - 1 || !p.via ? [i] : []));
+  const all = points.map((p) => p.pos);
+  const centre = opts.returnToStart ? centroid(all) : undefined;
   for (let k = 0; k < breaks.length - 1; k++) {
     const legOpts = { ...opts, style: styles[k] ?? opts.style, returnToStart: false };
     // A section's own ends are plain stops; U-turn rules apply between stops, not at them.
     const between = points.slice(breaks[k], breaks[k + 1] + 1);
     const pair = between.map((p, j) => (j === 0 || j === between.length - 1 ? { ...p, noUturn: false, via: false } : p));
-    let [best] = await planRoute(pair, legOpts, signal);
+    const found = await planRoute(pair, legOpts, signal, [], centre);
+    let [best] = found;
+    // Of this section's options, the one crossing itself and the sections
+    // before it least (a loop shouldn't ride a figure of eight).
+    const hits = (r: RouteResult) =>
+      opts.returnToStart ? crossings(r.path, null, all).length + sections.reduce((n, o) => n + crossings(r.path, o.path, all).length, 0) : 0;
+    best = found.reduce((b, r) => (hits(r) < hits(b) ? r : b), best);
     if (opts.returnToStart && k > 0) {
       const earlier = sections.map((r) => r.path);
       const ends = [pair[0].pos, pair[pair.length - 1].pos];
       if (sharedRoad(best.path, earlier, ends) >= LOOP_SHARED_METRES) {
         try {
-          const [other] = await planRoute(pair, legOpts, signal, avoidPoints(earlier, ends));
-          if (sharedRoad(other.path, earlier, ends) < sharedRoad(best.path, earlier, ends)) best = other;
+          const [other] = await planRoute(pair, legOpts, signal, avoidPoints(earlier, ends), centre);
+          if (sharedRoad(other.path, earlier, ends) < sharedRoad(best.path, earlier, ends) && hits(other) <= hits(best)) best = other;
         } catch (e) {
           if ((e as Error).name === "AbortError") throw e;
           // No other way: keep the first.
