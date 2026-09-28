@@ -1,0 +1,115 @@
+import { useEffect, useState } from "react";
+import PlaceSearch from "./PlaceSearch";
+import { distance, formatDistance, type LatLng } from "../lib/geo";
+import { placesAhead, RIDE_PLACE_KINDS, type RidePlace, type RidePlaceKind } from "../lib/rideStops";
+
+export type AddMode = "via" | "finish";
+
+interface Props {
+  /** Where the rider is. */
+  from: LatLng;
+  /** The road still ahead. */
+  ahead: LatLng[];
+  /** Route to the stop; resolves when the new route is in place. */
+  onAdd: (place: { name: string; position: LatLng }, mode: AddMode) => Promise<void>;
+  onClose: () => void;
+}
+
+/**
+ * Ride mode's "add a stop": search for anywhere, or pick fuel, food, a
+ * lookout or toilets along the road ahead, then stop there on the way or
+ * finish there.
+ */
+export default function RideAddStop({ from, ahead, onAdd, onClose }: Props) {
+  const [kind, setKind] = useState<RidePlaceKind | null>(null);
+  const [places, setPlaces] = useState<RidePlace[] | null>(null);
+  const [note, setNote] = useState("");
+  const [picked, setPicked] = useState<{ name: string; position: LatLng; where: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!kind) return;
+    const ctrl = new AbortController();
+    setPlaces(null);
+    setNote("Looking along the road ahead…");
+    placesAhead(kind, ahead, from, ctrl.signal)
+      .then((found) => {
+        setPlaces(found);
+        setNote(found.length ? "" : "Nothing found near the road ahead.");
+      })
+      .catch((e: Error) => e.name !== "AbortError" && setNote(e.message));
+    return () => ctrl.abort();
+    // Look once per choice; the rider keeps moving but the list stays put.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind]);
+
+  const where = (p: RidePlace) => (p.ahead != null ? `${formatDistance(p.ahead)} ahead` : `${formatDistance(p.away)} away`);
+
+  async function add(mode: AddMode) {
+    if (!picked) return;
+    setBusy(true);
+    setNote("");
+    try {
+      await onAdd(picked, mode);
+    } catch {
+      setNote("Couldn't find a route there. Try again, or pick somewhere else.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="ride-add" role="dialog" aria-label="Add a stop">
+      <div className="ride-add-head">
+        <strong>{picked ? picked.name : "Add a stop"}</strong>
+        <button className="ride-add-close" aria-label="Close" onClick={onClose}>
+          ✕
+        </button>
+      </div>
+      {picked ? (
+        <>
+          <p className="ride-add-where">{picked.where}</p>
+          <div className="ride-add-actions">
+            <button className="primary" disabled={busy} onClick={() => void add("via")}>
+              {busy ? "Finding the way…" : "Stop on the way"}
+            </button>
+            <button disabled={busy} onClick={() => void add("finish")}>
+              Finish here
+            </button>
+            <button disabled={busy} onClick={() => setPicked(null)}>
+              Back
+            </button>
+          </div>
+          {note && <p className="ride-add-note">{note}</p>}
+        </>
+      ) : (
+        <>
+          <PlaceSearch
+            near={from}
+            placeholder="Search for a place"
+            onPick={(name, position) => setPicked({ name, position, where: `${formatDistance(distance(from, position))} away` })}
+          />
+          <div className="ride-add-kinds" role="radiogroup" aria-label="Find along the road ahead">
+            {RIDE_PLACE_KINDS.map((k) => (
+              <button key={k.kind} role="radio" aria-checked={kind === k.kind} onClick={() => setKind(k.kind)}>
+                <span aria-hidden>{k.icon}</span> {k.name}
+              </button>
+            ))}
+          </div>
+          {note && <p className="ride-add-note">{note}</p>}
+          {places && places.length > 0 && (
+            <ol className="ride-add-list">
+              {places.map((p) => (
+                <li key={p.id}>
+                  <button onClick={() => setPicked({ name: p.name, position: p.position, where: where(p) })}>
+                    <strong>{p.name}</strong>
+                    <small>{where(p)}</small>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

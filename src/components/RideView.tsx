@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import ManeuverIcon from "./ManeuverIcon";
+import RideAddStop, { type AddMode } from "./RideAddStop";
 import type { RideLayer } from "./MapView";
-import { formatDistance, formatDuration, type LatLng } from "../lib/geo";
+import { distance, formatDistance, formatDuration, type LatLng } from "../lib/geo";
 import { Announcer, maneuverKind, Navigator, spliceRejoin, type Fix, type NavRoute, type NavState } from "../lib/navigation";
-import { routeBack, speedLimits, type RouteOptions, type RouteResult } from "../lib/routes";
+import { routeBack, routeVia, speedLimits, type RouteOptions, type RouteResult } from "../lib/routes";
 import { askToShowRideNotification, keepScreenOn, simulateRide, speak, subscribeGps, type Stop } from "../lib/device";
 
 interface Props {
@@ -39,6 +40,10 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
   const [rerouting, setRerouting] = useState(false);
   const [gpsNote, setGpsNote] = useState("Finding your position…");
   const [follow, setFollow] = useState(true);
+  const [adding, setAdding] = useState(false);
+  // "Finish here" turns a loop into a ride that ends somewhere else.
+  const [endsHome, setEndsHome] = useState(loop);
+  const lastFix = useRef<Fix | null>(null);
   const [muted, setMuted] = useState(() => {
     try {
       return localStorage.getItem(MUTE_KEY) === "1";
@@ -78,6 +83,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
       if (cancelled) return;
       setGpsNote("");
       setFix(f);
+      lastFix.current = f;
       const n = nav.current;
       const s = n.update(f);
       setState(s);
@@ -137,6 +143,42 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * A stop picked mid-ride: route from here to it, then (on the way) back
+   * onto the route at its nearest point ahead, or (finish) end there.
+   */
+  async function addStop(place: { name: string; position: LatLng }, mode: AddMode) {
+    const f = lastFix.current;
+    if (!f) throw new Error("No position yet");
+    const n = nav.current;
+    const path = active.current.path;
+    const here = state ? n.indexAt(state.along) : n.closestIndex(f.position);
+    let rejoin = path.length - 1;
+    if (mode === "via") {
+      // Back onto the route where it passes closest to the stop, ahead of the rider.
+      let bestD = Infinity;
+      for (let i = here + 1; i < path.length; i++) {
+        const d = distance(path[i], place.position);
+        if (d < bestD) {
+          bestD = d;
+          rejoin = i;
+        }
+      }
+    }
+    const r = await routeVia(f.position, state?.heading ?? null, place, mode === "via" ? path[rejoin] : null, options);
+    const leg: NavRoute = { path: r.path, steps: r.steps, distance: r.distance, duration: r.duration };
+    const next = mode === "via" && rejoin < path.length - 1 ? spliceRejoin(active.current, n, rejoin, leg) : leg;
+    active.current = next;
+    nav.current = new Navigator(next);
+    const home = mode === "via" && endsHome;
+    setEndsHome(home);
+    talk.current = new Announcer(home, true);
+    loadLimits(next);
+    setAdding(false);
+    say(mode === "via" ? `Added a stop at ${place.name}.` : `Heading to ${place.name}.`);
+    setState(nav.current.update(f));
+  }
+
   // Tell the map what to draw: the road ahead and where you are.
   useEffect(() => {
     const n = nav.current;
@@ -164,7 +206,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
           <div className="ride-next">
             <ManeuverIcon kind="arrive" />
             <div>
-              <strong>{loop ? "Back home" : "Arrived"}</strong>
+              <strong>{endsHome ? "Back home" : "Arrived"}</strong>
               <span>{formatDistance(route.distance)} ridden</span>
             </div>
           </div>
@@ -211,6 +253,15 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
 
       </div>
 
+      {adding && (
+        <RideAddStop
+          from={state?.snapped ?? fix?.position ?? route.path[0]}
+          ahead={state ? active.current.path.slice(n.indexAt(state.along)) : active.current.path}
+          onAdd={addStop}
+          onClose={() => setAdding(false)}
+        />
+      )}
+
       {!follow && (
         <button className="ride-recentre" onClick={() => setFollow(true)}>
           ◎ Re-centre
@@ -231,6 +282,11 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
           <strong>{eta ? eta.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "–"}</strong>
           <span>{state ? `${formatDistance(state.remaining)} · ${formatDuration(state.remainingTime)}` : "starting…"}</span>
         </div>
+        {!state?.arrived && (
+          <button className="ride-addstop" aria-label="Add a stop" onClick={() => setAdding((a) => !a)} aria-expanded={adding}>
+            ＋<small>Stop</small>
+          </button>
+        )}
         <button className="ride-end" onClick={onExit}>
           End
         </button>

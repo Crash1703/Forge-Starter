@@ -547,6 +547,34 @@ export async function routeBack(
 }
 
 /**
+ * From where the rider is, to a stop they've just picked, and on to `rejoin`
+ * (a point on their route ahead), or ending at the stop when `rejoin` is null.
+ * The stop becomes "Stop 1" in the directions, named for the voice.
+ */
+export async function routeVia(
+  from: LatLng,
+  heading: number | null,
+  stop: { name: string; position: LatLng },
+  rejoin: LatLng | null,
+  opts: RouteOptions,
+  signal?: AbortSignal,
+): Promise<RouteResult> {
+  const points: Waypoint[] = [
+    { pos: from, via: false, ...(heading != null ? { heading } : {}) },
+    { pos: stop.position, via: false, radius: 50 },
+    ...(rejoin ? [{ pos: rejoin, via: false }] : []),
+  ];
+  const [trip] = await computeRoutes(points, { ...opts, returnToStart: false }, false, signal);
+  const r = toResult(trip, stop.name, []);
+  return {
+    ...r,
+    steps: r.steps.map((st) =>
+      st.type === STOP_TYPE ? { ...st, instruction: stop.name, alert: `${stop.name} ahead.`, verbal: `You've reached ${stop.name}.` } : st,
+    ),
+  };
+}
+
+/**
  * Speed limits along a route, in km/h per path point (null where the map
  * has none), from Valhalla's trace_attributes on the route's own geometry.
  */
