@@ -9,6 +9,7 @@ import Icon, { type IconName } from "./components/Icon";
 import SettingsScreen from "./components/SettingsScreen";
 import StopList from "./components/StopList";
 import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
+import StopCard from "./components/StopCard";
 import { applySettings, loadSettings, storeSettings, type Settings } from "./lib/settings";
 import { clearRecentSearches } from "./lib/places";
 import { loadFuelPrices, priceNear, type FuelPrice, type Snapshot } from "./lib/fuelPrices";
@@ -148,6 +149,8 @@ export default function App() {
   const [sights, setSights] = useState<Sight[]>([]);
   const [sightsNote, setSightsNote] = useState("");
   const [sight, setSight] = useState<Sight | null>(null);
+  /** The stop whose pin was tapped: its card is open. */
+  const [stopCardId, setStopCardId] = useState<string | null>(null);
   /** The open place's "Loop via here": choosing where to start. */
   const [loopPick, setLoopPick] = useState(false);
   useEffect(() => setLoopPick(false), [sight]);
@@ -171,6 +174,10 @@ export default function App() {
   const fileInput = useRef<HTMLInputElement>(null);
 
   const route = routes[selected];
+  const stopCardIndex = stopCardId ? stops.findIndex((s) => s.id === stopCardId) : -1;
+  const stopCard = stopCardIndex >= 0 ? { stop: stops[stopCardIndex], index: stopCardIndex } : null;
+  /** Each leg's distance and time, when the planned route matches the stops. */
+  const stopLegs = route && !busy && route.legs.length === (options.returnToStart ? stops.length : stops.length - 1) ? route.legs : null;
   const bends = useMemo(() => (route ? countBends(route.path) : 0), [route]);
 
   useEffect(() => {
@@ -491,8 +498,10 @@ export default function App() {
   }
 
   function moveStop(id: string, position: LatLng) {
-    setStops((ss) => ss.map((s) => (s.id === id ? { ...s, position, label: "Locating…", auto: false } : s)));
-    labelStop(id, position);
+    // A name the rider gave stays; otherwise name the new spot.
+    const named = stops.find((s) => s.id === id)?.named;
+    setStops((ss) => ss.map((s) => (s.id === id ? { ...s, position, auto: false, ...(named ? {} : { label: "Locating…" }) } : s)));
+    if (!named) labelStop(id, position);
   }
 
   function reorder(from: number, to: number) {
@@ -1063,7 +1072,7 @@ export default function App() {
                 loop={options.returnToStart}
                 styles={STYLES}
                 routeStyle={options.style}
-                legs={route && !busy && route.legs.length === (options.returnToStart ? stops.length : stops.length - 1) ? route.legs : null}
+                legs={stopLegs}
                 onReorder={reorder}
                 onRemove={removeStop}
                 onLegStyle={(id, st) => setStops((ss) => ss.map((x) => (x.id === id ? { ...x, legStyle: st } : x)))}
@@ -1427,8 +1436,29 @@ export default function App() {
             sights={sights}
             priceAt={priceAt}
             home={settings.showHome ? (home?.position ?? null) : null}
-            onSightClick={setSight}
-            onMapClick={(p) => addStop(p)}
+            onSightClick={(x) => {
+              setStopCardId(null);
+              setSight(x);
+            }}
+            onMapClick={(p) => {
+              // With a pin's card open, a tap on the map just closes it.
+              if (stopCardId) setStopCardId(null);
+              else addStop(p);
+            }}
+            onStopClick={(id) => {
+              setSight(null);
+              setStopCardId(id);
+              // Room for the card on the map.
+              setSnap("peek");
+              // "… away from you": a recent fix is fine, and nothing is said if there's none.
+              if (!me && navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => setMe({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+                  () => {},
+                  { maximumAge: 5 * 60_000, timeout: 8000 },
+                );
+              }
+            }}
             onStopMove={moveStop}
             onRouteClick={(p, leg) => addStop(p, undefined, leg + 1)}
             onSelectRoute={setSelected}
@@ -1509,6 +1539,46 @@ export default function App() {
               </div>
             </div>
           </>
+        )}
+        {!riding && stopCard && (
+          <StopCard
+            stop={stopCard.stop}
+            index={stopCard.index}
+            kind={stopCard.index === 0 ? "start" : stopCard.index === stops.length - 1 && !options.returnToStart ? "end" : "via"}
+            prev={stopCard.index > 0 ? stops[stopCard.index - 1] : null}
+            routeStyle={options.style}
+            styles={STYLES}
+            legs={stopLegs}
+            me={me}
+            canMoveUp={stopCard.index > 0}
+            canMoveDown={stopCard.index < stops.length - 1}
+            onRename={(label) => setStops((ss) => ss.map((x) => (x.id === stopCard.stop.id ? { ...x, label, named: true } : x)))}
+            onLegStyle={(st) => {
+              const prev = stops[stopCard.index - 1];
+              setStops((ss) => ss.map((x) => (x.id === prev.id ? { ...x, legStyle: st } : x)));
+            }}
+            onMove={(dir) => reorder(stopCard.index, stopCard.index + dir)}
+            onSetDestination={
+              stopCard.index === stops.length - 1 && !options.returnToStart
+                ? null
+                : () => {
+                    setStops((ss) => [...ss.filter((x) => x.id !== stopCard.stop.id), ...ss.filter((x) => x.id === stopCard.stop.id)]);
+                    setOpt("returnToStart", false);
+                  }
+            }
+            onRoundTrip={() => {
+              setStopCardId(null);
+              setStops((ss) => [stopCard.stop, ...ss.filter((x) => x.id !== stopCard.stop.id)]);
+              setLoopStart("first");
+              setLoopScreen(true);
+            }}
+            onSetHome={() => setHome({ label: stopCard.stop.label, position: stopCard.stop.position })}
+            onRemove={() => {
+              setStopCardId(null);
+              removeStop(stopCard.stop.id);
+            }}
+            onClose={() => setStopCardId(null)}
+          />
         )}
         {!riding && sight && (
           <div className={`sight-card${loopPick ? " picking" : ""}`} role="dialog" aria-label={sight.name}>

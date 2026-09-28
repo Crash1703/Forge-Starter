@@ -32,6 +32,12 @@ export function bearing(a: LatLng, b: LatLng): number {
   return (deg(Math.atan2(y, x)) + 360) % 360;
 }
 
+/** "northeast" etc. for a bearing in degrees. */
+export function compassName(bearingDeg: number): string {
+  const names = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"];
+  return names[Math.round((((bearingDeg % 360) + 360) % 360) / 45) % 8];
+}
+
 /** Point reached by travelling `metres` from `from` on `bearingDeg`. */
 export function destination(from: LatLng, bearingDeg: number, metres: number): LatLng {
   const d = metres / R;

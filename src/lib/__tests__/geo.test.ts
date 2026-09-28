@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bearing,
+  compassName,
   curviness,
   curvinessLabel,
   destination,
@@ -370,5 +371,13 @@ describe("bestInsertIndex", () => {
   });
   it("with one stop, adds after it", () => {
     expect(bestInsertIndex([at(0)], at(5), false)).toBe(1);
+  });
+});
+
+describe("compassName", () => {
+  it("names the eight directions", () => {
+    expect([0, 44, 91, 135, 180, 225, 270, 315, 350, -90].map(compassName)).toEqual([
+      "north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest", "north", "west",
+    ]);
   });
 });

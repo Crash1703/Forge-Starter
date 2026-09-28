@@ -71,6 +71,8 @@ interface Props {
   home?: LatLng | null;
   onMapClick: (p: LatLng) => void;
   onStopMove: (id: string, p: LatLng) => void;
+  /** A stop's pin was tapped (not dragged). */
+  onStopClick?: (id: string) => void;
   onRouteClick: (p: LatLng, legIndex: number) => void;
   onSelectRoute: (i: number) => void;
   onMapReady?: (map: MapLibre) => void;
@@ -278,9 +280,17 @@ export default function MapView(props: Props) {
       if (!entry) {
         const pin = document.createElement("div");
         const marker = new Marker({ element: pin, draggable: true }).setLngLat([s.position.lng, s.position.lat]).addTo(m);
+        // A drag ends with a click on the pin too; only a tap opens its card.
+        let dragged = false;
+        marker.on("dragstart", () => (dragged = true));
         marker.on("dragend", () => {
           const { lat, lng } = marker.getLngLat();
           cb.current.onStopMove(s.id, { lat, lng });
+        });
+        pin.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (!dragged && !cb.current.ride) cb.current.onStopClick?.(s.id);
+          dragged = false;
         });
         entry = { marker, el: pin };
         markers.current.set(s.id, entry);
