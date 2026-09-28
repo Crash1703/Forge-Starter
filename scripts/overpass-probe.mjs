@@ -39,31 +39,27 @@ const fuelBox = `[out:json][timeout:25];(node["amenity"="fuel"](${bbox});way["am
 const UA_WEBVIEW = "Mozilla/5.0 (Linux; Android 14; SM-S911B Build/UP1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/129.0.0.0 Mobile Safari/537.36";
 const UA_CHROME = "Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36";
 const variants = {
-  "app (webview UA, Origin https://localhost)": { "User-Agent": UA_WEBVIEW, Origin: "https://localhost", Referer: "https://localhost/" },
-  "website (chrome UA, Origin github.io)": { "User-Agent": UA_CHROME, Origin: "https://crash1703.github.io", Referer: "https://crash1703.github.io/Forge-Starter/" },
-  "chrome UA, no Origin": { "User-Agent": UA_CHROME },
-  "app UA, Origin localhost, GET": { "User-Agent": UA_WEBVIEW, Origin: "https://localhost", get: true },
+  A_app: { "User-Agent": UA_WEBVIEW, Origin: "https://localhost", Referer: "https://localhost/" },
+  B_site: { "User-Agent": UA_CHROME, Origin: "https://crash1703.github.io", Referer: "https://crash1703.github.io/Forge-Starter/" },
+  C_native: { "User-Agent": "RideForge/1.26 (Android; +https://github.com/Crash1703/Forge-Starter)", Referer: "https://crash1703.github.io/Forge-Starter/" },
+  D_native_noref: { "User-Agent": "RideForge/1.26 (Android; +https://github.com/Crash1703/Forge-Starter)" },
 };
-const main = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
-for (const [vname, h] of Object.entries(variants)) {
-  for (const [qname, q] of Object.entries({ "fuel around": fuelAround, "fuel box": fuelBox })) {
-    console.log(`\n== ${vname} · ${qname}`);
-    for (const url of main) {
+const servers2 = ["https://overpass-api.de/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+for (let round = 1; round <= 3; round++) {
+  for (const [vname, headers] of Object.entries(variants)) {
+    for (const url of servers2) {
       const t0 = Date.now();
       try {
-        const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 30000);
-        const { get, ...headers } = h;
-        const r = get
-          ? await fetch(`${url}?data=${encodeURIComponent(q)}`, { signal: ctrl.signal, headers })
-          : await fetch(url, { method: "POST", signal: ctrl.signal, headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded" }, body: `data=${encodeURIComponent(q)}` });
+        const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 25000);
+        const r = await fetch(url, { method: "POST", signal: ctrl.signal, headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded" }, body: `data=${encodeURIComponent(fuelAround)}` });
         const text = await r.text(); clearTimeout(timer);
         let n = "-", remark = "";
-        try { const j = JSON.parse(text); n = j.elements?.length; remark = j.remark || ""; } catch { remark = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 140); }
-        console.log(`${new URL(url).host.padEnd(24)} ${r.status} ${String(Date.now() - t0).padStart(6)} ms  elements=${n}  cors=${r.headers.get("access-control-allow-origin")}  ${remark}`);
+        try { const j = JSON.parse(text); n = j.elements?.length; remark = j.remark || ""; } catch { remark = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 100); }
+        console.log(`round ${round} ${vname.padEnd(15)} ${new URL(url).host.padEnd(16)} ${r.status} ${String(Date.now() - t0).padStart(6)} ms elements=${n} ${remark}`);
       } catch (e) {
-        console.log(`${new URL(url).host.padEnd(24)} ERR ${String(Date.now() - t0).padStart(6)} ms  ${e.name}`);
+        console.log(`round ${round} ${vname.padEnd(15)} ${new URL(url).host.padEnd(16)} ERR ${String(Date.now() - t0).padStart(6)} ms ${e.name}`);
       }
-      await new Promise((r) => setTimeout(r, 1500));
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
 }
