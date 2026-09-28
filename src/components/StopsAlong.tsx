@@ -3,12 +3,17 @@ import Icon, { POI_ICONS } from "./Icon";
 import { formatDistance, type LatLng } from "../lib/geo";
 import type { RouteResult } from "../lib/routes";
 import { fuelGaps, poisAlong, POI_KINDS, type Poi, type PoiKind } from "../lib/pois";
+import { formatPrice, priceAge, type FuelPrice } from "../lib/fuelPrices";
 
 interface Props {
   route: RouteResult;
   /** What to mark on the map. */
   onPois: (pois: Poi[]) => void;
   onFocus: (p: LatLng) => void;
+  /** Today's price of the rider's fuel at a station, where known. */
+  priceAt?: (p: LatLng) => FuelPrice | null;
+  /** Why there are no prices (no token yet, service down). */
+  priceNote?: string;
 }
 
 const RANGE_KEY = "forge.tankRange";
@@ -28,7 +33,7 @@ type Lookup = { state: "busy" } | { state: "done"; pois: Poi[] } | { state: "fai
  * hide it. Each kind is its own small lookup (the map data server is free
  * and shared), with a warning for long stretches without fuel.
  */
-export default function StopsAlong({ route, onPois, onFocus }: Props) {
+export default function StopsAlong({ route, onPois, onFocus, priceAt, priceNote }: Props) {
   const [on, setOn] = useState<PoiKind[]>([]);
   const [found, setFound] = useState<Partial<Record<PoiKind, Lookup>>>({});
   const [range, setRange] = useState(loadRange);
@@ -81,6 +86,11 @@ export default function StopsAlong({ route, onPois, onFocus }: Props) {
   const failed = on.filter((k) => found[k]?.state === "failed");
   const busy = on.filter((k) => found[k]?.state === "busy");
   const kindName = (k: PoiKind) => POI_KINDS.find((x) => x.kind === k)!.name;
+  const prices = new Map(list.filter((p) => p.kind === "fuel").flatMap((p) => {
+    const price = priceAt?.(p.position);
+    return price ? [[p.id, price] as const] : [];
+  }));
+  const cheapest = Math.min(...[...prices.values()].map((p) => p.cents));
 
   return (
     <div className="along">
@@ -139,6 +149,7 @@ export default function StopsAlong({ route, onPois, onFocus }: Props) {
           km
         </label>
       )}
+      {fuel && priceNote && <p className="hint">{priceNote}</p>}
       {gaps.map((g) => (
         <p key={g.from} className="warning">
           <Icon name="fuel" size={16} /> No fuel for {formatDistance(g.to - g.from)}
@@ -155,6 +166,12 @@ export default function StopsAlong({ route, onPois, onFocus }: Props) {
               <button onClick={() => onFocus(p.position)}>
                 <Icon name={POI_ICONS[p.kind]} size={18} />
                 <strong>{p.name}</strong>
+                {prices.get(p.id) && (
+                  <span className={`price${prices.size > 1 && prices.get(p.id)!.cents === cheapest ? " cheapest" : ""}`} title={priceAge(prices.get(p.id)!)}>
+                    {formatPrice(prices.get(p.id)!)}
+                    {prices.get(p.id)!.cents === cheapest && prices.size > 1 ? " · cheapest" : ""}
+                  </span>
+                )}
                 <small>{formatDistance(p.at)}</small>
               </button>
             </li>

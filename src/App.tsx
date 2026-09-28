@@ -11,6 +11,7 @@ import StopList from "./components/StopList";
 import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
 import { applySettings, loadSettings, storeSettings, type Settings } from "./lib/settings";
 import { clearRecentSearches } from "./lib/places";
+import { loadFuelPrices, priceNear, type FuelPrice, type Snapshot } from "./lib/fuelPrices";
 import { MAX_SPAN, SIGHT_NAMES, sightsIn, type Bounds, type Sight } from "./lib/sights";
 import WeatherStrip from "./components/WeatherStrip";
 import StopsAlong from "./components/StopsAlong";
@@ -129,6 +130,8 @@ export default function App() {
   const [home, setHomeState] = useState<Home | null>(loadHome);
   const [settings, setSettingsState] = useState<Settings>(loadSettings);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [fuelData, setFuelData] = useState<Snapshot | null>(null);
+  const [fuelNote, setFuelNote] = useState("");
   const [menu, setMenu] = useState<"avoid" | "more" | null>(null);
   /** Where the next searched place goes in the stop list (from a leg's +). */
   const [insertAt, setInsertAt] = useState<number | null>(null);
@@ -219,6 +222,32 @@ export default function App() {
       ctrl?.abort();
     };
   }, [sightsOn, passesOn]);
+
+  // Queensland fuel prices, when there are fuel stations to price (or a ride
+  // is on) and the rider has a token; refreshed every 15 minutes.
+  const wantPrices = !!settings.fuelToken && (!!riding || pois.some((p) => p.kind === "fuel"));
+  useEffect(() => {
+    if (!wantPrices) return;
+    let stop = false;
+    const load = () =>
+      loadFuelPrices(settings.fuelToken)
+        .then((d) => {
+          if (stop) return;
+          setFuelData(d);
+          setFuelNote("");
+        })
+        .catch((e: Error) => !stop && setFuelNote(e.message));
+    void load();
+    const t = window.setInterval(load, 15 * 60_000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, [wantPrices, settings.fuelToken]);
+  const priceAt = useCallback(
+    (p: LatLng): FuelPrice | null => (fuelData && settings.fuelToken ? priceNear(p, fuelData, settings.fuelType) : null),
+    [fuelData, settings.fuelToken, settings.fuelType],
+  );
 
   // Auto map theme: dark from dusk to dawn where the map is (checked every 5 minutes).
   useEffect(() => {
@@ -777,6 +806,7 @@ export default function App() {
           onPause={(on) => recording.pause(on)}
           energySaving={settings.energySaving}
           knownPlaces={pois}
+          priceAt={priceAt}
           onExit={() => {
             setRiding(null);
             setRideLayer(null);
@@ -1147,6 +1177,8 @@ export default function App() {
                     <WeatherStrip route={route} onHover={setHover} />
                     <StopsAlong
                       route={route}
+                      priceAt={priceAt}
+                      priceNote={settings.fuelToken ? fuelNote : "Add a fuel price token in Settings to see Queensland prices."}
                       onPois={setPois}
                       onFocus={(p) => mapRef.current?.easeTo({ center: [p.lng, p.lat], zoom: Math.max(mapRef.current.getZoom(), 14) })}
                     />
@@ -1332,6 +1364,7 @@ export default function App() {
             onFollowBroken={() => setFollowBreaks((n) => n + 1)}
             onMapReady={(m) => (mapRef.current = m)}
             sights={sights}
+            priceAt={priceAt}
             home={settings.showHome ? (home?.position ?? null) : null}
             onSightClick={setSight}
             onMapClick={(p) => addStop(p)}

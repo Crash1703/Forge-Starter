@@ -64,6 +64,8 @@ interface Props {
   /** Sights to show as photo bubbles. */
   sights?: Sight[];
   onSightClick?: (s: Sight) => void;
+  /** Today's fuel price at a station, where known. */
+  priceAt?: (p: LatLng) => { cents: number } | null;
   /** The rider's home, marked with a house. */
   home?: LatLng | null;
   onMapClick: (p: LatLng) => void;
@@ -310,15 +312,23 @@ export default function MapView(props: Props) {
     const m = map.current;
     if (!m) return;
     poiMarkers.current.forEach((mk) => mk.remove());
+    const fuelPrices = (props.pois ?? []).flatMap((p) => (p.kind === "fuel" ? [props.priceAt?.(p.position)?.cents] : [])).filter((c): c is number => c != null);
+    const cheapestFuel = fuelPrices.length > 1 ? Math.min(...fuelPrices) : NaN;
     poiMarkers.current = (props.ride ? [] : (props.pois ?? [])).map((p) => {
       const el = document.createElement("div");
       el.className = `poi poi-${p.kind}`;
       el.innerHTML = iconSvg(POI_ICONS[p.kind], 16);
+      const price = p.kind === "fuel" ? props.priceAt?.(p.position) : null;
+      if (price) {
+        el.classList.add("priced");
+        el.insertAdjacentText("beforeend", price.cents.toFixed(1));
+        if (price.cents === cheapestFuel) el.classList.add("cheapest");
+      }
       el.title = p.name;
       return new Marker({ element: el }).setLngLat([p.position.lng, p.position.lat]).addTo(m);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.pois, !!props.ride]);
+  }, [props.pois, !!props.ride, props.priceAt]);
 
   useEffect(() => {
     const m = map.current;

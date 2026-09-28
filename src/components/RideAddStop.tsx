@@ -4,6 +4,7 @@ import PlaceSearch from "./PlaceSearch";
 import { distance, formatDistance, type LatLng } from "../lib/geo";
 import { knownPlaces, placesAhead, RIDE_PLACE_KINDS, type RidePlace, type RidePlaceKind } from "../lib/rideStops";
 import type { Poi } from "../lib/pois";
+import { formatPrice, priceAge, type FuelPrice } from "../lib/fuelPrices";
 
 export type AddMode = "via" | "finish";
 
@@ -24,6 +25,8 @@ interface Props {
   /** Route to the stop; resolves when the new route is in place. */
   onAdd: (place: { name: string; position: LatLng }, mode: AddMode) => Promise<void>;
   onClose: () => void;
+  /** Today's fuel price at a station, where known. */
+  priceAt?: (p: LatLng) => FuelPrice | null;
   /** Fuel and cafés found in the planner before riding. */
   known?: Poi[];
 }
@@ -33,7 +36,7 @@ interface Props {
  * lookout or toilets along the road ahead, then stop there on the way or
  * finish there.
  */
-export default function RideAddStop({ from, ahead, onAdd, onClose, known = [] }: Props) {
+export default function RideAddStop({ from, ahead, onAdd, onClose, known = [], priceAt }: Props) {
   const [kind, setKind] = useState<RidePlaceKind | null>(null);
   const [places, setPlaces] = useState<RidePlace[] | null>(null);
   const [note, setNote] = useState("");
@@ -67,6 +70,10 @@ export default function RideAddStop({ from, ahead, onAdd, onClose, known = [] }:
     // Look once per choice (or retry); the rider keeps moving but the list stays put.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, attempt]);
+
+  // The cheapest fuel on the list, when there's more than one price to compare.
+  const fuelCents = kind === "fuel" ? (places ?? []).flatMap((p) => priceAt?.(p.position)?.cents ?? []) : [];
+  const cheapestAhead = fuelCents.length > 1 ? Math.min(...fuelCents) : NaN;
 
   const where = (p: RidePlace) => (p.ahead != null ? `${formatDistance(p.ahead)} ahead` : `${formatDistance(p.away)} away`);
 
@@ -135,8 +142,16 @@ export default function RideAddStop({ from, ahead, onAdd, onClose, known = [] }:
             <ol className="ride-add-list">
               {places.map((p) => (
                 <li key={p.id}>
-                  <button onClick={() => setPicked({ name: p.name, position: p.position, where: where(p) })}>
+                  <button
+                    onClick={() => {
+                      const price = kind === "fuel" ? priceAt?.(p.position) : null;
+                      setPicked({ name: p.name, position: p.position, where: `${where(p)}${price ? ` · ${formatPrice(price)}, ${priceAge(price)}` : ""}` });
+                    }}
+                  >
                     <strong>{p.name}</strong>
+                    {kind === "fuel" && priceAt?.(p.position) && (
+                      <span className={`price${priceAt(p.position)!.cents === cheapestAhead ? " cheapest" : ""}`}>{formatPrice(priceAt(p.position)!)}</span>
+                    )}
                     <small>{where(p)}</small>
                   </button>
                 </li>
