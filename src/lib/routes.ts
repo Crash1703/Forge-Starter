@@ -11,6 +11,11 @@ export interface RouteOptions {
   avoidHighways: boolean;
   avoidTolls: boolean;
   avoidFerries: boolean;
+  /**
+   * Keep off dirt and gravel roads where there's a sealed way. On unless
+   * the rider turns it off (routes saved before it existed count as on).
+   */
+  avoidUnpaved?: boolean;
   /** Ride back to the first stop after the last one. */
   returnToStart: boolean;
 }
@@ -21,6 +26,7 @@ export const defaultOptions: RouteOptions = {
   avoidHighways: false,
   avoidTolls: false,
   avoidFerries: false,
+  avoidUnpaved: true,
   returnToStart: false,
 };
 
@@ -181,9 +187,13 @@ export function costing(opts: RouteOptions) {
     use_tolls: opts.avoidTolls ? 0 : 0.5,
     use_ferry: opts.avoidFerries ? 0 : 0.5,
   };
-  if (opts.vehicle === "car") return { costing: "auto", costing_options: { auto: common } };
-  // Motorcycle costing favours smaller roads as use_highways drops; keep it on paved roads.
-  return { costing: "motorcycle", costing_options: { motorcycle: { ...common, use_trails: 0 } } };
+  const dirtOk = opts.avoidUnpaved === false;
+  if (opts.vehicle === "car") return { costing: "auto", costing_options: { auto: { ...common, ...(dirtOk ? {} : { exclude_unpaved: true }) } } };
+  // Motorcycle costing favours smaller roads as use_highways drops. use_trails
+  // 0 keeps it on sealed roads wherever there's a way (from Imbil to Jimna it
+  // rides 143 km sealed rather than 58 km with 48 km of gravel); 0.5 lets it
+  // take gravel when that's the natural way.
+  return { costing: "motorcycle", costing_options: { motorcycle: { ...common, use_trails: dirtOk ? 0.5 : 0 } } };
 }
 
 async function computeRoutes(
@@ -413,6 +423,8 @@ export async function planRoute(
    * roads only go outwards from it, never across the loop's middle.
    */
   loopCentre?: LatLng,
+  /** Check the result for dirt roads and steer off them (not when already doing so). */
+  checkDirt = true,
 ): Promise<RouteResult[]> {
   const stops = points.map((p) => p.pos);
   const centre = loopCentre ?? (opts.returnToStart ? centroid(stops) : undefined);
@@ -526,7 +538,9 @@ export async function planRoute(
     }
   }
 
-  return rank(results, points, opts);
+  const ranked = rank(results, points, opts);
+  if (!checkDirt || opts.avoidUnpaved === false || !ranked.length) return ranked;
+  return lessDirt(ranked, points, opts, signal, avoid, loopCentre);
 }
 
 /**
@@ -638,6 +652,84 @@ export async function speedLimits(path: LatLng[], opts: RouteOptions, signal?: A
     for (let i = from; i <= to; i++) limits[i] = limit;
   }
   return limits;
+}
+
+/** Dirt that's not worth mentioning or steering round (a car park, a gravel driveway). */
+const DIRT_TOLERANCE_M = 200;
+
+/**
+ * How much of `path` is dirt or gravel road, and where: the route server
+ * matches the path to the map and reports each road's surface.
+ */
+export async function dirtOn(path: LatLng[], opts: RouteOptions, signal?: AbortSignal): Promise<{ metres: number; stretches: LatLng[][] }> {
+  const k = Math.max(1, Math.ceil(path.length / 1500));
+  const shape = path.filter((_, i) => i % k === 0 || i === path.length - 1);
+  const res = await routerFetch(
+    "/trace_attributes",
+    {
+      shape: shape.map((p) => ({ lat: p.lat, lon: p.lng })),
+      costing: costing(opts).costing,
+      shape_match: "map_snap",
+      filters: { attributes: ["edge.unpaved", "edge.surface", "edge.length", "edge.begin_shape_index", "edge.end_shape_index"], action: "include" },
+    },
+    signal,
+  );
+  if (!res.ok) throw new RoutingError(`Road surfaces unavailable (HTTP ${res.status})`);
+  const json: { edges?: { unpaved?: boolean; surface?: string; length?: number; begin_shape_index?: number; end_shape_index?: number }[] } = await res.json();
+  let metres = 0;
+  const stretches: LatLng[][] = [];
+  for (const e of json.edges ?? []) {
+    const dirt = e.unpaved || ["dirt", "gravel", "path", "impassable"].includes(e.surface ?? "");
+    if (!dirt || e.begin_shape_index == null || e.end_shape_index == null) continue;
+    metres += (e.length ?? 0) * 1000; // km
+    stretches.push(shape.slice(e.begin_shape_index, e.end_shape_index + 1));
+  }
+  return { metres, stretches };
+}
+
+/** "Includes 700 m of dirt road" */
+export const dirtWarning = (metres: number) =>
+  `Includes ${metres >= 1000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres / 50) * 50} m`} of dirt road (there's no sealed way round).`;
+
+/**
+ * The best route still takes a dirt road: plan again, told to stay off
+ * those stretches (except right by a stop, which may only be reachable that
+ * way). Keep whichever has less dirt, unless it's much slower; say how much
+ * dirt is left.
+ */
+async function lessDirt(
+  ranked: RouteResult[],
+  points: RoutePoint[],
+  opts: RouteOptions,
+  signal: AbortSignal | undefined,
+  avoid: LatLng[],
+  loopCentre: LatLng | undefined,
+): Promise<RouteResult[]> {
+  const best = ranked[0];
+  const note = (list: RouteResult[], metres: number) =>
+    metres < DIRT_TOLERANCE_M ? list : [{ ...list[0], warnings: [...list[0].warnings, dirtWarning(metres)] }, ...list.slice(1)];
+  let dirt: Awaited<ReturnType<typeof dirtOn>>;
+  try {
+    dirt = await dirtOn(best.path, opts, signal);
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw e;
+    return ranked; // can't tell: leave the route as planned
+  }
+  if (dirt.metres < DIRT_TOLERANCE_M) return ranked;
+  try {
+    const steer = avoidPoints(dirt.stretches, points.map((p) => p.pos), 50 - Math.min(avoid.length, 40), 300);
+    if (!steer.length) return note(ranked, dirt.metres);
+    const again = await planRoute(points, opts, signal, [...avoid, ...steer], loopCentre, false);
+    const other = again[0];
+    if (other && other.duration <= best.duration * 1.5 + 600) {
+      const left = await dirtOn(other.path, opts, signal);
+      if (left.metres < dirt.metres * 0.7) return note(again, left.metres);
+    }
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw e;
+    // No other way (say, a stop only reachable on gravel): keep the first plan.
+  }
+  return note(ranked, dirt.metres);
 }
 
 /**

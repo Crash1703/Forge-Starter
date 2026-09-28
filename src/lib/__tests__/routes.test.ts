@@ -38,9 +38,17 @@ describe("costing", () => {
     const fast = { ...defaultOptions, style: "fastest" as const, vehicle: "car" as const, avoidTolls: true };
     expect(costing(fast)).toEqual({
       costing: "auto",
-      costing_options: { auto: { use_highways: 1, use_tolls: 0, use_ferry: 0.5 } },
+      costing_options: { auto: { use_highways: 1, use_tolls: 0, use_ferry: 0.5, exclude_unpaved: true } },
     });
     expect(costing({ ...fast, avoidHighways: true }).costing_options).toMatchObject({ auto: { use_highways: 0 } });
+  });
+
+  it("keeps motorcycles off dirt roads unless the rider allows them", () => {
+    expect(costing(defaultOptions).costing_options).toMatchObject({ motorcycle: { use_trails: 0 } });
+    expect(costing({ ...defaultOptions, avoidUnpaved: false }).costing_options).toMatchObject({ motorcycle: { use_trails: 0.5 } });
+    // Routes saved before the option existed keep off dirt too.
+    const { avoidUnpaved: _, ...old } = defaultOptions;
+    expect(costing(old as typeof defaultOptions).costing_options).toMatchObject({ motorcycle: { use_trails: 0 } });
   });
 });
 
@@ -172,7 +180,9 @@ describe("twisty helper points", () => {
     let calls = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => {
+      vi.fn(async (url: string) => {
+        // Route requests only (not the dirt-road check afterwards).
+        if (!url.endsWith("/route")) return new Response("{}");
         calls++;
         open++;
         most = Math.max(most, open);
@@ -411,7 +421,7 @@ describe("per-section ride styles", () => {
       }),
     );
     const [r] = await planSections([{ pos: a }, { pos: b }, { pos: c }], ["fastest", "scenic"], defaultOptions);
-    const sectionRequests = bodies.filter((x) => x.locations.length === 2);
+    const sectionRequests = bodies.filter((x) => x.locations?.length === 2);
     expect(sectionRequests[0].costing_options.motorcycle.use_highways).toBe(1);
     expect(sectionRequests[sectionRequests.length - 1].costing_options.motorcycle.use_highways).toBe(0);
     expect(r.path).toHaveLength(3);
@@ -609,5 +619,60 @@ describe("snapping a pin to the road", () => {
     expect(await snapToRoad(paddock, defaultOptions)).toEqual(paddock);
     vi.stubGlobal("fetch", vi.fn(async () => new Response("[]")));
     expect(await snapToRoad(paddock, defaultOptions)).toEqual(paddock);
+  });
+});
+
+describe("keeping off dirt roads", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const a = { lat: -26.46, lng: 152.68 };
+  const b = destination(a, 225, 30000);
+  const leg = (pts: { lat: number; lng: number }[], km: number) => ({
+    summary: { length: km, time: km * 60 },
+    legs: [{ shape: encode6(pts.map((p) => [p.lat, p.lng])), summary: { length: km, time: km * 60 } }],
+  });
+  const gravel = leg([a, destination(a, 225, 10000), destination(a, 225, 20000), b], 30); // straight through the forest
+  const sealed = leg([a, destination(a, 180, 20000), b], 40); // round by the highway
+
+  function router(sealedExists: boolean) {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        bodies.push({ url, body });
+        if (url.endsWith("/trace_attributes")) {
+          // The straight way has 12 km of gravel in the middle; the highway none.
+          const onGravel = Math.abs(body.shape[1].lon - destination(a, 225, 10000).lng) < 1e-4;
+          const edges = onGravel ? [{ unpaved: true, surface: "gravel", length: 12, begin_shape_index: 1, end_shape_index: 2 }] : [{ unpaved: false, surface: "paved", length: 40, begin_shape_index: 0, end_shape_index: 2 }];
+          return new Response(JSON.stringify({ edges }));
+        }
+        const steered = Array.isArray(body.exclude_locations) && body.exclude_locations.length > 0;
+        return new Response(JSON.stringify({ trip: steered && sealedExists ? sealed : gravel }));
+      }),
+    );
+    return bodies;
+  }
+
+  it("plans again round the dirt when there's a sealed way", async () => {
+    const bodies = router(true);
+    const [r] = await planRoute([{ pos: a }, { pos: b }], defaultOptions);
+    expect(r.distance).toBe(40000);
+    expect(r.warnings).toEqual([]);
+    const steer = bodies.find((x) => x.url.endsWith("/route") && x.body.exclude_locations);
+    expect((steer!.body.exclude_locations as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it("says how much dirt is left when there's no other way", async () => {
+    router(false);
+    const [r] = await planRoute([{ pos: a }, { pos: b }], defaultOptions);
+    expect(r.distance).toBe(30000);
+    expect(r.warnings).toEqual(["Includes 12.0 km of dirt road (there's no sealed way round)."]);
+  });
+
+  it("doesn't check when the rider is happy on dirt", async () => {
+    const bodies = router(true);
+    await planRoute([{ pos: a }, { pos: b }], { ...defaultOptions, avoidUnpaved: false });
+    expect(bodies.every((x) => x.url.endsWith("/route"))).toBe(true);
+    expect(bodies.length).toBe(1);
   });
 });

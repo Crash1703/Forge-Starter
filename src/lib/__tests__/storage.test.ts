@@ -13,6 +13,9 @@ describe("share links", () => {
     const back = decodeShare(encodeShare(stops, opts))!;
     expect(back.options).toEqual(opts);
     expect(back.stops.map((s) => [s.label, s.position])).toEqual(stops.map((s) => [s.label, s.position]));
+    expect(decodeShare(encodeShare(stops, { ...opts, avoidUnpaved: false }))!.options.avoidUnpaved).toBe(false);
+    // Links from before the dirt-road option keep off dirt.
+    expect(decodeShare("#r=scenic.motorcycle.0000~1,2,a~3,4,b")!.options.avoidUnpaved).toBe(true);
   });
 
   it("ignores unrelated hashes", () => {

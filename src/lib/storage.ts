@@ -120,7 +120,8 @@ export function storeHome(home: Home | null): boolean {
 
 /** Compact, shareable URL hash: #r=<style>.<vehicle>.<flags>~lat,lng,label~... */
 export function encodeShare(stops: Stop[], o: RouteOptions): string {
-  const flags = [o.avoidHighways, o.avoidTolls, o.avoidFerries, o.returnToStart].map((b) => (b ? 1 : 0)).join("");
+  // A 5th flag, set, means dirt roads are allowed (absent: kept off them, as before it existed).
+  const flags = [o.avoidHighways, o.avoidTolls, o.avoidFerries, o.returnToStart, o.avoidUnpaved === false].map((b) => (b ? 1 : 0)).join("");
   // encodeURIComponent leaves "~" alone, but it is our separator.
   const enc = (s: string) => encodeURIComponent(s).replace(/~/g, "%7E");
   // A section's own style rides along as a 4th field (f, s or t), and any
@@ -166,6 +167,7 @@ export function decodeShare(hash: string): { stops: Stop[]; options: RouteOption
     avoidTolls: flags[1] === "1",
     avoidFerries: flags[2] === "1",
     returnToStart: flags[3] === "1",
+    avoidUnpaved: flags[4] !== "1",
   };
   return normalizeLoop(stops, options);
 }
