@@ -11,10 +11,12 @@ interface Props {
   onChange: (s: Settings) => void;
   onClearSearches: () => void;
   onClose: () => void;
+  /** This build's version, shown under About. */
+  build: string;
 }
 
 /** App settings: units, clock, how stops are placed, navigation, history. */
-export default function SettingsScreen({ settings: s, onChange, onClearSearches, onClose }: Props) {
+export default function SettingsScreen({ settings: s, onChange, onClearSearches, onClose, build }: Props) {
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...s, [k]: v });
   const [check, setCheck] = useState<{ busy?: boolean; text: string; ok?: boolean } | null>(null);
   const [server, setServer] = useState(s.routeServer);
@@ -207,6 +209,15 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
         >
           {mapCleared ? "Saved map data deleted" : "Delete saved map data"}
         </button>
+
+        <h3 className="set-group">About</h3>
+        <p className="credits">
+          Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>{" "}
+          contributors · tiles <a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> · routing{" "}
+          <a href="https://valhalla.github.io/valhalla/" target="_blank" rel="noreferrer">Valhalla</a> (FOSSGIS) · search{" "}
+          <a href="https://photon.komoot.io" target="_blank" rel="noreferrer">Photon</a> · elevation and weather{" "}
+          <a href="https://open-meteo.com" target="_blank" rel="noreferrer">Open-Meteo</a> · version {build}
+        </p>
       </div>
     </div>,
     document.body,

@@ -257,6 +257,8 @@ export default function MapView(props: Props) {
     const m = map.current;
     if (!m) return;
     m.setPadding({ top: props.insetTop ?? 0, left: 0, right: 0, bottom: props.insetBottom });
+    // The map's credits (ⓘ) sit just above the panel, where they can be seen.
+    el.current?.style.setProperty("--cover", `${props.insetBottom}px`);
     // setPadding stops any camera animation, including a fit that just started
     // (the panel often moves at the same moment); redo it with the new padding.
     const fit = lastFit.current;
