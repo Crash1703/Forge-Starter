@@ -4,6 +4,13 @@ import MapView from "./components/MapView";
 import BottomSheet, { type Snap } from "./components/BottomSheet";
 import TwistGauge from "./components/TwistGauge";
 import RideView from "./components/RideView";
+import RidesPanel from "./components/RidesPanel";
+import WeatherStrip from "./components/WeatherStrip";
+import StopsAlong from "./components/StopsAlong";
+import type { Poi } from "./lib/pois";
+import { useRecording } from "./lib/useRecording";
+import { deleteRide, listRides, putRide } from "./lib/rideStore";
+import { trackPath, type RideRecord } from "./lib/recorder";
 import type { RideLayer } from "./components/MapView";
 import MapErrorBoundary from "./components/MapErrorBoundary";
 import PlaceSearch from "./components/PlaceSearch";
@@ -14,14 +21,16 @@ import {
   formatDistance,
   formatDuration,
   isDaylight,
+  LOOP_KMH,
+  loopThrough,
   roundTripWaypoints,
   twistScore,
   type LatLng,
 } from "./lib/geo";
-import { defaultOptions, planRoute, type RouteOptions, type RouteResult, type RouteStyle } from "./lib/routes";
+import { defaultOptions, planRoute, planSections, type RouteOptions, type RouteResult, type RouteStyle } from "./lib/routes";
 import { elevationProfile, type ElevationProfile } from "./lib/elevation";
 import { reverseGeocode } from "./lib/places";
-import { parseGpx, toGpx } from "./lib/gpx";
+import { parseGpx, sampleStops, toGpx } from "./lib/gpx";
 import { saveFile, shareableUrl, shareLink } from "./lib/native";
 import {
   decodeShare,
@@ -42,6 +51,19 @@ const STYLES: { id: RouteStyle; name: string; hint: string }[] = [
 
 /** Short commit ID of this build, shown in the footer so riders can tell whether a refresh picked up an update. */
 const BUILD = (import.meta.env.VITE_BUILD_ID as string | undefined)?.slice(0, 7) || "dev";
+
+/** Compass rose for round trips: 8 directions around "any direction". */
+const COMPASS: { label: string; name: string; deg: number | null }[] = [
+  { label: "NW", name: "North-west", deg: 315 },
+  { label: "N", name: "North", deg: 0 },
+  { label: "NE", name: "North-east", deg: 45 },
+  { label: "W", name: "West", deg: 270 },
+  { label: "Any", name: "Any direction", deg: null },
+  { label: "E", name: "East", deg: 90 },
+  { label: "SW", name: "South-west", deg: 225 },
+  { label: "S", name: "South", deg: 180 },
+  { label: "SE", name: "South-east", deg: 135 },
+];
 
 type MapTheme = "auto" | "light" | "dark";
 const THEME_KEY = "forge.mapTheme";
@@ -70,10 +92,29 @@ export default function App() {
   const [profile, setProfile] = useState<ElevationProfile | null>(null);
   const [hover, setHover] = useState<LatLng | null>(null);
   const [fitKey, setFitKey] = useState(0);
-  const [tab, setTab] = useState<"plan" | "saved">("plan");
+  const [tab, setTab] = useState<"plan" | "saved" | "rides">("plan");
+  const [rides, setRides] = useState<RideRecord[]>([]);
+  const [selectedRide, setSelectedRide] = useState<RideRecord | null>(null);
+  const [showHistory, setShowHistory] = useState(() => {
+    try {
+      return localStorage.getItem("forge.showRides") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [confirmStop, setConfirmStop] = useState(false);
+  const [pois, setPois] = useState<Poi[]>([]);
+  const backupInput = useRef<HTMLInputElement>(null);
+  const autoRecord = useRef(false);
   const [saved, setSaved] = useState<SavedRoute[]>(loadSaved);
   const [name, setName] = useState("");
   const [loopKm, setLoopKm] = useState(120);
+  const [loopMode, setLoopMode] = useState<"distance" | "time">("distance");
+  const [loopMin, setLoopMin] = useState(120);
+  const [loopDir, setLoopDir] = useState<number | null>(null); // compass degrees, null = any
+  const [loopVia, setLoopVia] = useState<{ label: string; position: LatLng } | null>(null);
+  // A time-based loop is checked once against its planned riding time, and resized if well off.
+  const loopFit = useRef<{ targetSec: number; km: number } | null>(null);
   const [showSteps, setShowSteps] = useState(false);
   const [toast, setToast] = useState("");
   const [center, setCenter] = useState<LatLng | undefined>();
@@ -92,6 +133,19 @@ export default function App() {
 
   const route = routes[selected];
   const bends = useMemo(() => (route ? countBends(route.path) : 0), [route]);
+
+  useEffect(() => {
+    const fit = loopFit.current;
+    if (!fit || !route || busy) return;
+    loopFit.current = null;
+    const ratio = fit.targetSec / Math.max(60, route.duration);
+    if (ratio < 0.8 || ratio > 1.2) {
+      makeLoop(Math.min(800, Math.max(10, fit.km * ratio)));
+      flash(`Resizing the loop to about ${formatDuration(fit.targetSec)}`);
+    }
+    // Runs when a freshly planned route arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route, busy]);
 
   // Auto map theme: dark from dusk to dawn where the map is (checked every 5 minutes).
   useEffect(() => {
@@ -139,8 +193,42 @@ export default function App() {
     window.setTimeout(() => setToast(""), 2500);
   }, []);
 
+  const refreshRides = useCallback(() => {
+    listRides()
+      .then(setRides)
+      .catch(() => undefined);
+  }, []);
+  useEffect(refreshRides, [refreshRides]);
+
+  const recording = useRecording((ride) => {
+    refreshRides();
+    setSelectedRide(ride);
+    setTab("rides");
+    setSnap("half");
+    setFitKey((k) => k + 1);
+    flash(`Ride saved: ${formatDistance(ride.stats.distance)}`);
+  });
+
+  async function stopRecording(save: boolean) {
+    setConfirmStop(false);
+    autoRecord.current = false;
+    const tooShort = recording.state && recording.state.distance < recording.minMetres;
+    await recording.stop(save);
+    if (save && tooShort) flash("Too short to keep: rides under 200 m aren't saved");
+  }
+
+  const histories = useMemo(
+    // Every 4th point is plenty for faint background lines.
+    () => (showHistory ? rides.map((r) => trackPath(r.points).filter((_, i, a) => i % 4 === 0 || i === a.length - 1)) : []),
+    [rides, showHistory],
+  );
+  const selectedTrack = useMemo(
+    () => (tab === "rides" && selectedRide ? trackPath(selectedRide.points) : null),
+    [tab, selectedRide],
+  );
+
   // Recompute whenever the stops or options change (debounced so dragging feels calm).
-  const stopsKey = stops.map((s) => `${s.position.lat},${s.position.lng}${s.auto ? "*" : ""}`).join("|");
+  const stopsKey = stops.map((s) => `${s.position.lat},${s.position.lng}${s.auto ? "*" : ""}${s.legStyle ?? ""}`).join("|");
   useEffect(() => {
     if (stops.length < 2) {
       setRoutes([]);
@@ -164,7 +252,9 @@ export default function App() {
           radius: between ? (s.auto ? 1000 : 75) : undefined,
         };
       });
-      planRoute(points, options, ctrl.signal)
+      // Sections with their own style are planned one at a time and joined.
+      const styles = ride.slice(0, -1).map((s) => s.legStyle);
+      (styles.some(Boolean) ? planSections(points, styles, options, ctrl.signal) : planRoute(points, options, ctrl.signal))
         .then((r) => {
           setRoutes(r);
           setSnap((s) => (s === "peek" ? "half" : s));
@@ -239,18 +329,36 @@ export default function App() {
     setStops((ss) => ss.filter((s) => s.id !== id));
   }
 
-  function makeLoop(start?: Stop) {
-    const origin = start ?? stops[0];
+  function makeLoop(km?: number) {
+    const origin = stops[0];
     if (!origin) {
       flash("Set a start point first");
       return;
     }
-    const heading = Math.random() * 360;
-    const pts = roundTripWaypoints(origin.position, loopKm * 1000, heading);
-    const via = pts.map((p) => ({ id: newId(), position: p, label: "Locating…", auto: true }));
+    const length = km ?? (loopMode === "distance" ? loopKm : (loopMin / 60) * LOOP_KMH[options.style]);
+    let via: Stop[];
+    if (loopVia) {
+      const side = Math.random() < 0.5 ? 1 : -1; // a different way round each time
+      const { waypoints, viaIndex } = loopThrough(origin.position, loopVia.position, length * 1000, side);
+      via = waypoints.map((p, i) =>
+        i === viaIndex
+          ? { id: newId(), position: p, label: loopVia.label }
+          : { id: newId(), position: p, label: "Locating…", auto: true },
+      );
+    } else {
+      // A chosen direction still varies a little, so "another loop" differs.
+      const heading = loopDir == null ? Math.random() * 360 : (loopDir + Math.random() * 40 - 20 + 360) % 360;
+      via = roundTripWaypoints(origin.position, length * 1000, heading).map((p) => ({
+        id: newId(),
+        position: p,
+        label: "Locating…",
+        auto: true,
+      }));
+    }
     setStops([{ ...origin, auto: false }, ...via]);
     setOptions((o) => ({ ...o, returnToStart: true }));
-    via.forEach((v) => labelStop(v.id, v.position));
+    via.filter((v) => v.auto).forEach((v) => labelStop(v.id, v.position));
+    loopFit.current = loopMode === "time" && km === undefined ? { targetSec: loopMin * 60, km: length } : null;
     wantFit.current = true;
   }
 
@@ -271,6 +379,75 @@ export default function App() {
       () => flash("Couldn't get your location"),
       { enableHighAccuracy: true, timeout: 10000 },
     );
+  }
+
+  /** Ride mode for real: record the ride too, unless already recording. */
+  function startRide() {
+    if (!recording.state) {
+      recording.start(name.trim() || routeTitle());
+      autoRecord.current = true;
+    }
+    setRiding({ simulate: false });
+  }
+
+  function planAgain(ride: RideRecord) {
+    const plan = normalizeLoop(
+      sampleStops(trackPath(ride.points), 8).map((p) => ({ id: newId(), position: p, label: "Locating…" })),
+      options,
+    );
+    setStops(plan.stops);
+    setOptions(plan.options);
+    plan.stops.forEach((s) => labelStop(s.id, s.position));
+    setName(ride.name);
+    setSelectedRide(null);
+    setTab("plan");
+    wantFit.current = true;
+  }
+
+  function exportRide(ride: RideRecord) {
+    const track = trackPath(ride.points);
+    saveFile(
+      `${ride.name.replace(/[^\w-]+/g, "_").slice(0, 60) || "ride"}.gpx`,
+      toGpx({ name: ride.name, waypoints: [track[0], track[track.length - 1]], track }),
+      "application/gpx+xml",
+    ).catch(() => undefined);
+  }
+
+  function backUp() {
+    const data = { app: "ride-forge", version: 1, savedAt: Date.now(), routes: saved, rides };
+    const day = new Date().toISOString().slice(0, 10);
+    saveFile(`ride-forge-backup-${day}.json`, JSON.stringify(data), "application/json")
+      .then(() => flash(`Backed up ${saved.length} routes and ${rides.length} rides`))
+      .catch(() => undefined);
+  }
+
+  async function restore(file: File) {
+    try {
+      const data = JSON.parse(await file.text());
+      if (data?.app !== "ride-forge") throw new Error("That isn't a Ride Forge backup file");
+      const routes: SavedRoute[] = Array.isArray(data.routes) ? data.routes : [];
+      const newRoutes = routes.filter((r) => r?.id && !saved.some((x) => x.id === r.id));
+      const merged = [...newRoutes, ...saved].sort((a, b) => b.savedAt - a.savedAt);
+      setSaved(merged);
+      storeSaved(merged);
+      const incoming: RideRecord[] = Array.isArray(data.rides) ? data.rides : [];
+      const newRides = incoming.filter((r) => r?.id && Array.isArray(r.points) && !rides.some((x) => x.id === r.id));
+      for (const r of newRides) await putRide(r);
+      refreshRides();
+      flash(`Restored ${newRoutes.length} routes and ${newRides.length} rides`);
+    } catch (e) {
+      flash((e as Error).message || "Couldn't read that backup");
+    }
+  }
+
+  function removeRide(ride: RideRecord) {
+    deleteRide(ride.id)
+      .then(() => {
+        setSelectedRide(null);
+        refreshRides();
+        flash("Ride deleted");
+      })
+      .catch(() => flash("Couldn't delete that ride"));
   }
 
   function routeTitle() {
@@ -371,10 +548,25 @@ export default function App() {
           onExit={() => {
             setRiding(null);
             setRideLayer(null);
+            if (autoRecord.current) void stopRecording(true);
           }}
         />
       ) : (
       <BottomSheet snap={snap} onSnap={setSnap} onCover={setCover}>
+        {recording.unfinished && !recording.state && (
+          <section className="notice" role="status" data-peek>
+            <p>
+              An unfinished ride recording was found from{" "}
+              {new Date(recording.unfinished.startedAt).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}.
+            </p>
+            <div className="button-row">
+              <button className="primary" onClick={() => void recording.keepUnfinished()}>
+                Save ride
+              </button>
+              <button onClick={() => void recording.discardUnfinished()}>Discard</button>
+            </div>
+          </section>
+        )}
         {(route || busy) && (
           <section className="summary" aria-live="polite" data-peek>
             {busy && <div className="progress" />}
@@ -405,7 +597,7 @@ export default function App() {
                     ▷ Preview ride
                   </button>
                 </div>
-                <button className="ride-go primary" onClick={() => setRiding({ simulate: false })} disabled={busy}>
+                <button className="ride-go primary" onClick={startRide} disabled={busy}>
                   Ride
                 </button>
               </>
@@ -427,6 +619,9 @@ export default function App() {
             </button>
             <button role="tab" aria-selected={tab === "saved"} onClick={() => setTab("saved")}>
               Saved{saved.length ? ` (${saved.length})` : ""}
+            </button>
+            <button role="tab" aria-selected={tab === "rides"} onClick={() => setTab("rides")}>
+              Rides{rides.length ? ` (${rides.length})` : ""}
             </button>
           </nav>
         </header>
@@ -463,6 +658,25 @@ export default function App() {
                       <span className="label" title={s.label}>
                         {s.label}
                       </span>
+                      {(i < stops.length - 1 || (options.returnToStart && stops.length > 1)) && (
+                        <select
+                          className="leg-style"
+                          aria-label={`Ride style from ${s.label} to the next stop`}
+                          value={s.legStyle ?? ""}
+                          onChange={(e) =>
+                            setStops((ss) =>
+                              ss.map((x) => (x.id === s.id ? { ...x, legStyle: (e.target.value || undefined) as RouteStyle | undefined } : x)),
+                            )
+                          }
+                        >
+                          <option value="">↓ {STYLES.find((x) => x.id === options.style)?.name}</option>
+                          {STYLES.map((x) => (
+                            <option key={x.id} value={x.id}>
+                              ↓ {x.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       <span className="row-actions">
                         <button aria-label="Move up" disabled={i === 0} onClick={() => reorder(i, i - 1)}>
                           ↑
@@ -572,17 +786,72 @@ export default function App() {
 
             <section>
               <h2>Round trip</h2>
+              <div className="segmented two" role="radiogroup" aria-label="Plan the loop by">
+                {(["distance", "time"] as const).map((m) => (
+                  <button key={m} role="radio" aria-checked={loopMode === m} onClick={() => setLoopMode(m)}>
+                    {m === "distance" ? "Distance" : "Riding time"}
+                  </button>
+                ))}
+              </div>
               <div className="loop">
-                <input
-                  type="range"
-                  min={20}
-                  max={500}
-                  step={10}
-                  value={loopKm}
-                  onChange={(e) => setLoopKm(+e.target.value)}
-                  aria-label="Round trip length"
-                />
-                <output>{loopKm} km</output>
+                {loopMode === "distance" ? (
+                  <input
+                    id="loop-km"
+                    type="range"
+                    min={20}
+                    max={500}
+                    step={10}
+                    value={loopKm}
+                    onChange={(e) => setLoopKm(+e.target.value)}
+                    aria-label="Round trip length"
+                  />
+                ) : (
+                  <input
+                    id="loop-min"
+                    type="range"
+                    min={30}
+                    max={480}
+                    step={15}
+                    value={loopMin}
+                    onChange={(e) => setLoopMin(+e.target.value)}
+                    aria-label="Round trip riding time"
+                  />
+                )}
+                <output>{loopMode === "distance" ? `${loopKm} km` : formatDuration(loopMin * 60)}</output>
+              </div>
+              <div className="loop-options">
+                <div className={`compass${loopVia ? " disabled" : ""}`} role="radiogroup" aria-label="Head out towards">
+                  {COMPASS.map((c) => (
+                    <button
+                      key={c.label}
+                      role="radio"
+                      aria-checked={loopDir === c.deg}
+                      aria-label={c.name}
+                      title={c.name}
+                      disabled={!!loopVia}
+                      onClick={() => setLoopDir(c.deg)}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="loop-via">
+                  <small>{loopVia ? "Riding via" : "Head out towards a direction, or ride via a place:"}</small>
+                  {loopVia ? (
+                    <span className="chip">
+                      {loopVia.label}
+                      <button aria-label={`Don't ride via ${loopVia.label}`} onClick={() => setLoopVia(null)}>
+                        ✕
+                      </button>
+                    </span>
+                  ) : (
+                    <PlaceSearch
+                      near={stops[0]?.position ?? center}
+                      placeholder="Via a place (optional)"
+                      onPick={(label, p) => setLoopVia({ label, position: p })}
+                    />
+                  )}
+                </div>
               </div>
               <button className="wide" onClick={() => makeLoop()} disabled={!stops.length}>
                 ↻ {options.returnToStart && stops.some((s) => s.auto) ? "Try another loop" : "Make a loop from A"}
@@ -636,6 +905,12 @@ export default function App() {
                       </p>
                     ))}
                     {profile && <ElevationChart profile={profile} onHover={setHover} />}
+                    <WeatherStrip route={route} onHover={setHover} />
+                    <StopsAlong
+                      route={route}
+                      onPois={setPois}
+                      onFocus={(p) => mapRef.current?.easeTo({ center: [p.lng, p.lat], zoom: Math.max(mapRef.current.getZoom(), 14) })}
+                    />
 
                     <div className="save">
                       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name this route" aria-label="Route name" />
@@ -680,12 +955,50 @@ export default function App() {
               </section>
             )}
           </div>
+        ) : tab === "rides" ? (
+          <RidesPanel
+            rides={rides}
+            selected={selectedRide}
+            showHistory={showHistory}
+            onToggleHistory={(on) => {
+              setShowHistory(on);
+              try {
+                localStorage.setItem("forge.showRides", on ? "1" : "0");
+              } catch {
+                /* remembered for this visit */
+              }
+            }}
+            onSelect={(r) => {
+              setSelectedRide(r);
+              if (r) setFitKey((k) => k + 1);
+            }}
+            onDelete={removeRide}
+            onPlanAgain={planAgain}
+            onExport={exportRide}
+            onHover={setHover}
+          />
         ) : (
           <div className="scroll">
             <section>
               <button className="wide" onClick={() => fileInput.current?.click()}>
                 ⤒ Import GPX
               </button>
+              <div className="button-row">
+                <button onClick={backUp}>Back up routes &amp; rides</button>
+                <button onClick={() => backupInput.current?.click()}>Restore a backup</button>
+              </div>
+              <p className="hint">A backup file moves your saved routes and rides between the website and the app, or to a new phone.</p>
+              <input
+                ref={backupInput}
+                type="file"
+                accept=".json,application/json"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void restore(f);
+                  e.target.value = "";
+                }}
+              />
               <input
                 ref={fileInput}
                 type="file"
@@ -746,6 +1059,9 @@ export default function App() {
             insetBottom={riding ? 110 : cover}
             insetTop={riding ? 220 : 0}
             me={me}
+            track={selectedTrack}
+            pois={tab === "plan" ? pois : []}
+            history={histories}
             ride={riding ? (rideLayer ?? { ahead: route?.path ?? [], position: null, heading: null, follow: true }) : null}
             onFollowBroken={() => setFollowBreaks((n) => n + 1)}
             onMapReady={(m) => (mapRef.current = m)}
@@ -761,6 +1077,14 @@ export default function App() {
             <span aria-hidden>{themePref === "auto" ? "◐" : themePref === "light" ? "☀" : "☾"}</span>
             <small>{themePref === "auto" ? "Auto" : themePref === "light" ? "Day" : "Night"}</small>
           </button>
+          <button
+            className={`fab rec${recording.state ? " on" : ""}`}
+            onClick={() => (recording.state ? setConfirmStop(true) : recording.start())}
+            aria-label={recording.state ? "Stop recording" : "Record a ride"}
+            title={recording.state ? "Stop recording" : "Record a ride"}
+          >
+            <span aria-hidden>{recording.state ? "■" : "●"}</span>
+          </button>
           <button className="fab" onClick={centreOnMe} aria-label="Show my location">
             <span aria-hidden>◎</span>
           </button>
@@ -770,6 +1094,28 @@ export default function App() {
             </button>
           )}
         </div>
+        )}
+        {recording.state && (
+          <div className={`rec-pill${riding ? " riding" : ""}`} role="status">
+            <span className="rec-dot" aria-hidden /> REC {formatClock(recording.state.elapsed)} · {formatDistance(recording.state.distance)}
+          </div>
+        )}
+        {confirmStop && recording.state && (
+          <div className="rec-confirm" role="dialog" aria-label="Stop recording?">
+            <strong>Stop recording?</strong>
+            <span>
+              {formatDistance(recording.state.distance)} in {formatClock(recording.state.elapsed)}
+            </span>
+            <div className="button-row">
+              <button className="primary" onClick={() => void stopRecording(true)}>
+                Save ride
+              </button>
+              <button onClick={() => setConfirmStop(false)}>Keep recording</button>
+              <button className="danger" onClick={() => void stopRecording(false)}>
+                Discard
+              </button>
+            </div>
+          </div>
         )}
         {toast && <div className="toast">{toast}</div>}
       </main>
@@ -781,4 +1127,13 @@ export default function App() {
 function StopBadge({ index, count, loop }: { index: number; count: number; loop: boolean }) {
   const kind = index === 0 ? "start" : index === count - 1 && !loop ? "end" : "via";
   return <span className={`badge ${kind}`}>{kind === "start" ? "A" : kind === "end" ? "B" : index}</span>;
+}
+
+/** 1:05:09 or 5:09 */
+function formatClock(seconds: number): string {
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }

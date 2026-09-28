@@ -141,6 +141,41 @@ export function roundTripWaypoints(
 }
 
 /**
+ * Waypoints for a loop from `start` that passes through `via`, roughly
+ * `targetMetres` long by road. The loop is a circle through both points,
+ * on the `side` (+1 left, -1 right) of the line between them; if `via` is
+ * too far away for that length, the circle grows just enough to reach it.
+ * Returns the waypoints in riding order with `via` among them (at `viaIndex`).
+ */
+export function loopThrough(
+  start: LatLng,
+  via: LatLng,
+  targetMetres: number,
+  side: 1 | -1 = 1,
+  points = 3,
+  roadFactor = 1.35,
+): { waypoints: LatLng[]; viaIndex: number } {
+  const d = distance(start, via);
+  const radius = Math.max(targetMetres / roadFactor / (2 * Math.PI), (d / 2) * 1.05);
+  const toVia = bearing(start, via);
+  const mid = destination(start, toVia, d / 2);
+  const h = Math.sqrt(Math.max(0, radius * radius - (d / 2) * (d / 2)));
+  const centre = destination(mid, (toVia + (side > 0 ? 270 : 90)) % 360, h);
+  const startAngle = bearing(centre, start);
+  // Go round the circle in the direction that reaches `via` within the first lap.
+  const out: LatLng[] = [];
+  for (let i = 1; i <= points; i++) out.push(destination(centre, (startAngle + (360 * i * side) / (points + 1) + 360) % 360, radius));
+  // Swap in the real place for whichever generated point is nearest to it.
+  let viaIndex = 0;
+  for (let i = 1; i < out.length; i++) if (distance(out[i], via) < distance(out[viaIndex], via)) viaIndex = i;
+  out[viaIndex] = via;
+  return { waypoints: out, viaIndex };
+}
+
+/** Typical average riding speed by style, for turning a riding time into a loop length. */
+export const LOOP_KMH = { fastest: 75, scenic: 60, twisty: 50 } as const;
+
+/**
  * How many metres of road the route rides twice, out and back, within
  * `window` metres (along the route) of the point of `path` nearest to `near`:
  * the signature of a detour up a dead end, or of riding on past a stop to
@@ -350,6 +385,7 @@ export function formatDistance(m: number): string {
 }
 
 export function formatDuration(s: number): string {
+  if (s > 0 && s < 30) return "under 1 min";
   const h = Math.floor(s / 3600);
   const m = Math.round((s % 3600) / 60);
   return h ? `${h} h ${m.toString().padStart(2, "0")} min` : `${m} min`;

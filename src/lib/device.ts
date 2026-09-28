@@ -62,6 +62,39 @@ export async function watchPosition(onFix: (f: Fix) => void, onError: (message: 
   return () => navigator.geolocation.clearWatch(id);
 }
 
+type GpsListener = { onFix: (f: Fix) => void; onError: (message: string) => void };
+const gpsListeners = new Set<GpsListener>();
+let gpsStop: Stop | null = null;
+let gpsStarting = false;
+
+/**
+ * Share one GPS watcher between everything that needs it (Ride mode and ride
+ * recording), so the app runs one location service and one notification.
+ * Returns an unsubscribe function; the watcher stops when nobody listens.
+ */
+export function subscribeGps(onFix: (f: Fix) => void, onError: (message: string) => void = () => undefined): Stop {
+  const listener = { onFix, onError };
+  gpsListeners.add(listener);
+  if (!gpsStop && !gpsStarting) {
+    gpsStarting = true;
+    void watchPosition(
+      (f) => gpsListeners.forEach((l) => l.onFix(f)),
+      (m) => gpsListeners.forEach((l) => l.onError(m)),
+    ).then((stop) => {
+      gpsStarting = false;
+      if (gpsListeners.size) gpsStop = stop;
+      else stop(); // everyone left while it was starting
+    });
+  }
+  return () => {
+    gpsListeners.delete(listener);
+    if (!gpsListeners.size && gpsStop) {
+      gpsStop();
+      gpsStop = null;
+    }
+  };
+}
+
 /**
  * Ride the route without moving: fixes along the path at `kmh`, `speedUp`
  * times faster than real time. Powers "Preview ride" and the tests.
@@ -125,4 +158,20 @@ export async function keepScreenOn(): Promise<Stop> {
     document.removeEventListener("visibilitychange", onVisible);
     void lock?.release();
   };
+}
+
+/**
+ * Android 13+ hides the "navigating" notification (the one that keeps GPS
+ * running with the screen locked) until the app may post notifications.
+ * Ask once, when the first ride starts; riding works either way.
+ */
+export async function askToShowRideNotification(): Promise<void> {
+  if (!isApp) return;
+  try {
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    const { display } = await LocalNotifications.checkPermissions();
+    if (display === "prompt" || display === "prompt-with-rationale") await LocalNotifications.requestPermissions();
+  } catch {
+    /* older Android: nothing to ask */
+  }
 }

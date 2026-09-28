@@ -9,6 +9,7 @@ import {
   formatDuration,
   midpointOffset,
   outAndBack,
+  loopThrough,
   sharedRoad,
   countBends,
   twistSections,
@@ -235,5 +236,30 @@ describe("sun", () => {
     expect(sunElevation(brisbane, new Date("2026-09-27T02:00:00Z"))).toBeGreaterThan(50);
     expect(isDaylight(brisbane, new Date("2026-09-27T14:00:00Z"))).toBe(false);
     expect(isDaylight(brisbane, new Date("2026-09-27T02:00:00Z"))).toBe(true);
+  });
+});
+
+describe("loopThrough", () => {
+  const home = { lat: -26.65, lng: 153.05 };
+  const maleny = { lat: -26.76, lng: 152.85 };
+
+  it("puts the chosen place on the loop and keeps it about the asked length", () => {
+    const { waypoints, viaIndex } = loopThrough(home, maleny, 120000, 1);
+    expect(waypoints[viaIndex]).toEqual(maleny);
+    const loop = pathLength([home, ...waypoints, home]);
+    expect(loop).toBeGreaterThan((120000 / 1.35) * 0.8);
+    expect(loop).toBeLessThan((120000 / 1.35) * 1.1);
+  });
+
+  it("grows the loop when the place is too far for the asked length", () => {
+    const { waypoints } = loopThrough(home, maleny, 20000, 1);
+    // The place is ~23 km away, so the loop must be at least ~46 km in a straight line.
+    expect(pathLength([home, ...waypoints, home])).toBeGreaterThan(46000);
+  });
+
+  it("goes round either way", () => {
+    const left = loopThrough(home, maleny, 120000, 1).waypoints;
+    const right = loopThrough(home, maleny, 120000, -1).waypoints;
+    expect(distance(left[0], right[0])).toBeGreaterThan(5000);
   });
 });

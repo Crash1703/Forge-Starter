@@ -301,20 +301,26 @@ async function untangleLoop(
  * quickest one, or that ride up a dead end and back to reach their helper
  * point, are dropped.
  */
-export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal?: AbortSignal): Promise<RouteResult[]> {
+export async function planRoute(
+  points: RoutePoint[],
+  opts: RouteOptions,
+  signal?: AbortSignal,
+  /** Roads to stay off (used when planning a loop one section at a time). */
+  avoid: LatLng[] = [],
+): Promise<RouteResult[]> {
   const stops = points.map((p) => p.pos);
   if (stops.length > MAX_STOPS) throw new RoutingError(`A route can have at most ${MAX_STOPS} stops.`);
   let base: Waypoint[] = points.map((p) => ({ ...p, via: false }));
   let baseRoutes: ValhallaTrip[];
   let turnsAround = false;
   try {
-    baseRoutes = await computeRoutes(base, opts, true, signal);
+    baseRoutes = await computeRoutes(base, opts, true, signal, avoid);
   } catch (e) {
     // A pin at the end of a dead end can only be reached by turning around.
     // Allow it rather than failing, and tell the rider.
     if (!(e instanceof RoutingError && e.noPath && base.some((p) => p.noUturn))) throw e;
     base = base.map((p) => ({ ...p, noUturn: false }));
-    baseRoutes = await computeRoutes(base, opts, true, signal);
+    baseRoutes = await computeRoutes(base, opts, true, signal, avoid);
     turnsAround = true;
   }
   const loop = opts.returnToStart
@@ -334,7 +340,7 @@ export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal
   if (twice.some((m, i) => m > SPUR_METRES && points[i + 1].noUturn)) {
     const relaxed = base.map((p, i) => (i > 0 && twice[i - 1] > SPUR_METRES ? { ...p, noUturn: false } : p));
     try {
-      const other = await computeRoutes(relaxed, opts, true, signal);
+      const other = await computeRoutes(relaxed, opts, true, signal, avoid);
       other[0] = await loop(other[0], relaxed);
       const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
       if (sum(ridesTwice(other[0])) < sum(twice)) {
@@ -372,7 +378,7 @@ export async function planRoute(points: RoutePoint[], opts: RouteOptions, signal
         if (signal?.aborted) break;
         const pts = [...base.slice(0, leg + 1), { pos: detour, via: true, radius: HELPER_RADIUS }, ...base.slice(leg + 1)];
         try {
-          const [r] = await computeRoutes(pts, opts, false, signal);
+          const [r] = await computeRoutes(pts, opts, false, signal, avoid);
           const candidate = toResult(await loop(r, pts), "Detour", [detour]);
           // The helper point only exists to pull the route sideways. If
           // reaching it means riding up a dead end and back, drop this option.
@@ -453,4 +459,76 @@ export async function speedLimits(path: LatLng[], opts: RouteOptions, signal?: A
     for (let i = from; i <= to; i++) limits[i] = limit;
   }
   return limits;
+}
+
+/**
+ * Plan a route whose sections have their own ride styles (say, Fastest to
+ * the hills, then Twisty): each section between stops is planned on its own
+ * with its style, then they're joined into one route. `styles[i]` is the style
+ * from stop i to stop i + 1; missing entries use `opts.style`.
+ *
+ * On a loop, a section that would ride back along road an earlier section
+ * used is planned again staying off that road, as whole-route loops are.
+ */
+export async function planSections(
+  points: RoutePoint[],
+  styles: (RouteStyle | undefined)[],
+  opts: RouteOptions,
+  signal?: AbortSignal,
+): Promise<RouteResult[]> {
+  if (points.length > MAX_STOPS) throw new RoutingError(`A route can have at most ${MAX_STOPS} stops.`);
+  const sections: RouteResult[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const legOpts = { ...opts, style: styles[i] ?? opts.style, returnToStart: false };
+    // A section's own ends are plain stops; U-turn rules apply between stops, not at them.
+    const pair = [{ ...points[i], noUturn: false }, { ...points[i + 1], noUturn: false }];
+    let [best] = await planRoute(pair, legOpts, signal);
+    if (opts.returnToStart && i > 0) {
+      const earlier = sections.map((r) => r.path);
+      const ends = [points[i].pos, points[i + 1].pos];
+      if (sharedRoad(best.path, earlier, ends) >= LOOP_SHARED_METRES) {
+        try {
+          const [other] = await planRoute(pair, legOpts, signal, avoidPoints(earlier, ends));
+          if (sharedRoad(other.path, earlier, ends) < sharedRoad(best.path, earlier, ends)) best = other;
+        } catch (e) {
+          if ((e as Error).name === "AbortError") throw e;
+          // No other way: keep the first.
+        }
+      }
+    }
+    sections.push(best);
+  }
+  return [joinSections(sections)];
+}
+
+/** One route from consecutive sections: paths joined, steps renumbered, arrivals mid-way become stops. */
+export function joinSections(sections: RouteResult[]): RouteResult {
+  const path: LatLng[] = [];
+  const steps: Step[] = [];
+  sections.forEach((r, i) => {
+    const offset = Math.max(0, path.length - 1);
+    const last = i === sections.length - 1;
+    path.push(...r.path.slice(i ? 1 : 0));
+    for (const st of r.steps) {
+      // A later section's "head north" is just carrying on from the stop.
+      if (i > 0 && st.type >= 1 && st.type <= 3) continue;
+      if (!last && st.type >= 4 && st.type <= 6) {
+        steps.push({ ...st, at: st.at + offset, type: STOP_TYPE, instruction: `Stop ${i + 1}`, alert: `Stop ${i + 1} ahead.`, verbal: `You've reached stop ${i + 1}.` });
+        continue;
+      }
+      steps.push({ ...st, at: st.at + offset });
+    }
+  });
+  return {
+    id: Math.random().toString(36).slice(2),
+    label: "Recommended",
+    path,
+    distance: sections.reduce((a, r) => a + r.distance, 0),
+    duration: sections.reduce((a, r) => a + r.duration, 0),
+    curviness: curviness(path),
+    legs: sections.flatMap((r) => r.legs),
+    steps,
+    detours: sections.flatMap((r) => r.detours),
+    warnings: [...new Set(sections.flatMap((r) => r.warnings))],
+  };
 }

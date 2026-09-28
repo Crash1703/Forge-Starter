@@ -6,9 +6,14 @@ A motorcycle-focused route planner in the spirit of Calimoto, built entirely on 
 - **Ride styles**: *Fastest* (motorways allowed), *Scenic* (no motorways) or *Twisty*, which looks for the curviest roads.
 - **Motorcycle routing**: uses Valhalla's motorcycle profile, which prefers smaller roads as motorways are avoided and stays on paved roads.
 - **Avoid** motorways, tolls and ferries.
-- **Round trips**: pick a distance and get a loop from your start point. Press again for a different loop. Or place your own pins and tick **Loop back to the start** under the stop list. On a loop the route may not turn around at any stop, so it doesn't ride up dead ends and back. It also comes home a different way: any leg that would ride back along road already used on an earlier leg is re-planned to stay off that road, except near stops and home. If there's no other road, it keeps the original. If a pin can only be reached by turning around (say, at the end of a dead-end road), the route still works and the app tells you which situation you're in.
+- **Round trips**: pick a distance, or a riding time, and get a loop from your start point. Press again for a different loop. You can point the loop in a compass direction (N, NE, E…) or send it through a place you name (a café, a pass). Loops planned by time are resized until the riding time fits. Or place your own pins and tick **Loop back to the start** under the stop list. On a loop the route may not turn around at any stop, so it doesn't ride up dead ends and back. It also comes home a different way: any leg that would ride back along road already used on an earlier leg is re-planned to stay off that road, except near stops and home. If there's no other road, it keeps the original. If a pin can only be reached by turning around (say, at the end of a dead-end road), the route still works and the app tells you which situation you're in.
 - **Ride mode**: turn-by-turn navigation along *your* route. It shows the next turn in big type with a countdown, speaks the turns (Android's voice in the app, the browser's voice on the website), and shows your speed, the speed limit where the map has one, and your arrival time. Leave the route and it finds a way back onto it ahead, starting in the direction you're riding, instead of re-planning the whole ride. In the Android app, GPS keeps running with the screen locked (you'll see a "navigating" notification) and the screen stays on while riding. On the website it needs the screen on. **Preview ride** plays the route at 4× speed.
 - **Map-first design**: on phones the map fills the screen and the planner slides up from the bottom. A 0–10 twistiness gauge and bend count sit on the summary card, and the route line is coloured by twistiness (orange → red → purple). There's a day, night or automatic map (dark after sunset).
+- **Ride recording and logbook**: tap the red button on the map to record any ride. Rides in Ride mode record automatically. The **Rides** tab lists every ride with distance, riding time, average and top speed (a 5-second average, so GPS spikes don't count), bends, climb, an estimated lean angle (from speed and bend radius) and the twistiest 5 km, plus speed and elevation charts. You can export a ride as GPX, plan it again, or show all your rides as faint lines on the map. Rides are kept in the device's IndexedDB. The ride in progress is saved as a draft, so a crash or a killed app doesn't lose it.
+- **Weather on the way**: the forecast for when you'll actually reach each part of the route (leaving now, in 1–3 hours or tomorrow morning), with temperature, rain chance and wind, and a warning if rain is likely somewhere along the ride.
+- **Fuel & cafés**: find fuel stations, cafés and bakeries near the route, shown on the map and listed by distance along the ride. Set your tank range and it warns about any stretch with no fuel for longer than that.
+- **Per-section ride styles**: give each leg its own style (say, fast to the hills, twisty through them, then fast home) from the menu next to each stop. Styles are kept in share links.
+- **Backup and restore**: the **Saved** tab can download all saved routes and recorded rides as one file and restore it, so you can move them between the website and the app, or to a new phone. Restoring merges; it doesn't delete anything.
 - **Route details**: distance, riding time, a curviness rating, total climb, an elevation profile (hover it to see the spot on the map) and turn-by-turn directions.
 - **Save routes** in the browser, **share** them as a link, **import and export GPX** (for Garmin, TomTom, etc.) and hand off to the Google Maps app for live navigation.
 - Works on phones: the map sits on top and the planner below it. Follows the system light or dark theme.
@@ -29,7 +34,8 @@ Open http://localhost:5173. That's it: no keys needed.
 | Map | [MapLibre GL](https://maplibre.org) with [OpenFreeMap](https://openfreemap.org) tiles | None for normal use |
 | Routing | [Valhalla](https://github.com/valhalla/valhalla) on the FOSSGIS public server | Fair use, about 1 request per second |
 | Place search | [Photon](https://photon.komoot.io) by Komoot | Fair use |
-| Elevation | [Open-Meteo](https://open-meteo.com/en/docs/elevation-api) | 10,000 calls/day, non-commercial |
+| Elevation and weather | [Open-Meteo](https://open-meteo.com) elevation and forecast APIs | 10,000 calls/day, non-commercial |
+| Fuel & cafés | [Overpass API](https://overpass-api.de) (OpenStreetMap data) | Fair use; looked up only when you ask |
 
 The public servers are run by volunteers and non-profits. That's fine for personal use. For a public app with real traffic, run your own Valhalla and Photon (both have Docker images) or use a paid host, then point the app at them in `.env` (see `.env.example`).
 
@@ -75,6 +81,11 @@ src/
     MapView.tsx           MapLibre map: pins, route lines, clicks, dragging
     PlaceSearch.tsx       Photon search-as-you-type box
     ElevationChart.tsx    SVG elevation profile
+    LineChart.tsx         SVG line chart (ride speed)
+    RideView.tsx          Ride mode: turn-by-turn navigation screen
+    RidesPanel.tsx        ride logbook and ride details
+    WeatherStrip.tsx      forecast along the route
+    StopsAlong.tsx        fuel and cafés along the route, fuel-gap warnings
     MapErrorBoundary.tsx  keeps the planner usable if the map fails
   lib/
     config.ts             service URLs (overridable in .env)
@@ -85,11 +96,19 @@ src/
     gpx.ts                GPX import and export
     storage.ts            saved routes and share links
     polyline.ts           encoded-polyline decoder (precision 5 and 6)
+    navigation.ts         route matching and spoken-turn timing
+    recorder.ts           GPS track recording and ride statistics
+    rideStore.ts          IndexedDB storage for rides and the ride draft
+    useRecording.ts       React hook for recording rides
+    device.ts             GPS, voice, keep-awake (native in the app)
+    weather.ts            Open-Meteo forecast along the route
+    pois.ts               Overpass fuel/café lookup and fuel gaps
 ```
 
 ## Limits to know about
 
 - A route can have at most 25 stops. GPX imports are cut to the first 25 points.
 - **Navigate** opens the Google Maps app (a plain link, no API use). Google recalculates the route itself and supports only a few waypoints. For exact turn-by-turn on your planned line, export a GPX to a navigation device or an app such as OsmAnd.
-- Saved routes live in the browser's local storage. They don't sync between devices; use **Share** links or GPX for that.
+- Saved routes and rides live on the device (browser storage, or the app's). They don't sync between devices; use **Back up** / **Restore**, **Share** links or GPX for that.
+- Weather is a forecast, up to about a week ahead. Fuel and café data comes from OpenStreetMap, so a station may be missing or closed; carry a margin.
 - The public routing server may say it's busy at peak times. Wait a moment and try again.
