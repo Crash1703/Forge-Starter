@@ -86,6 +86,34 @@ export function storeSaved(routes: SavedRoute[]): boolean {
   }
 }
 
+/** The rider's home: a start point for loops and a "take me home" destination. */
+export interface Home {
+  label: string;
+  position: LatLng;
+}
+
+const HOME_KEY = "forge.home";
+
+export function loadHome(): Home | null {
+  try {
+    const h = JSON.parse(localStorage.getItem(HOME_KEY) ?? "null");
+    return h && Number.isFinite(h.position?.lat) && Number.isFinite(h.position?.lng) ? { label: String(h.label || "Home"), position: h.position } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remember (or with null, forget) home. False if the browser won't store it. */
+export function storeHome(home: Home | null): boolean {
+  try {
+    if (home) localStorage.setItem(HOME_KEY, JSON.stringify(home));
+    else localStorage.removeItem(HOME_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Compact, shareable URL hash: #r=<style>.<vehicle>.<flags>~lat,lng,label~... */
 export function encodeShare(stops: Stop[], o: RouteOptions): string {
   const flags = [o.avoidHighways, o.avoidTolls, o.avoidFerries, o.returnToStart].map((b) => (b ? 1 : 0)).join("");

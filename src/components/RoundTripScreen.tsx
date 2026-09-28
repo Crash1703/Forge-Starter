@@ -15,7 +15,7 @@ export const COMPASS: { label: string; name: string; deg: number | null }[] = [
   { label: "NW", name: "North-west", deg: 315 },
 ];
 
-export type LoopStart = "here" | "first";
+export type LoopStart = "here" | "first" | "home";
 
 interface Props {
   mode: "distance" | "time";
@@ -35,6 +35,8 @@ interface Props {
   onStart: (s: LoopStart) => void;
   /** The current first stop, offered as a start point. */
   firstStop?: string;
+  /** Home's name, when one is set. */
+  home?: string;
   near: LatLng;
   busy: boolean;
   onCreate: () => void;
@@ -94,6 +96,7 @@ export default function RoundTripScreen(p: Props) {
             <span>Start from</span>
             <select id="rt-start" value={p.start} onChange={(e) => p.onStart(e.target.value as LoopStart)}>
               <option value="here">➤ Current location</option>
+              {p.home && <option value="home">⌂ Home · {p.home}</option>}
               {p.firstStop && <option value="first">A · {p.firstStop}</option>}
             </select>
           </label>
@@ -138,7 +141,7 @@ export default function RoundTripScreen(p: Props) {
         </div>
       </div>
       <footer className="screen-foot">
-        <button className="primary big" onClick={p.onCreate} disabled={p.busy || (p.start === "first" && !p.firstStop)}>
+        <button className="primary big" onClick={p.onCreate} disabled={p.busy || (p.start === "first" && !p.firstStop) || (p.start === "home" && !p.home)}>
           {p.busy ? "Finding you…" : "Create a round trip"}
         </button>
       </footer>

@@ -1,5 +1,6 @@
+// @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
-import { decodeShare, encodeShare, normalizeLoop, reverseStops, routePoints } from "../storage";
+import { decodeShare, encodeShare, loadHome, normalizeLoop, reverseStops, routePoints, storeHome } from "../storage";
 import { defaultOptions } from "../routes";
 
 describe("share links", () => {
@@ -93,5 +94,21 @@ describe("shaping points", () => {
     const back = decodeShare(encodeShare([home, a, b], { ...defaultOptions, returnToStart: true }))!;
     expect(back.stops.map((s) => s.shape)).toEqual([home.shape, a.shape, b.shape]);
     expect(back.stops[1].legStyle).toBe("twisty");
+  });
+});
+
+describe("home", () => {
+  it("remembers and forgets home", () => {
+    expect(storeHome({ label: "Home", position: { lat: -26.8, lng: 153.1 } })).toBe(true);
+    expect(loadHome()).toEqual({ label: "Home", position: { lat: -26.8, lng: 153.1 } });
+    storeHome(null);
+    expect(loadHome()).toBeNull();
+  });
+
+  it("ignores a broken saved home", () => {
+    localStorage.setItem("forge.home", '{"label":"x","position":{}}');
+    expect(loadHome()).toBeNull();
+    localStorage.setItem("forge.home", "not json");
+    expect(loadHome()).toBeNull();
   });
 });
