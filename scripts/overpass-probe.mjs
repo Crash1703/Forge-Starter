@@ -34,27 +34,36 @@ const co = (l) => l.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join("
 const lats = path.map((p) => p.lat), lngs = path.map((p) => p.lng);
 const bbox = [Math.min(...lats) - 0.01, Math.min(...lngs) - 0.01, Math.max(...lats) + 0.01, Math.max(...lngs) + 0.01].map((v) => v.toFixed(4)).join(",");
 
-const queries = {
-  "planner (3 filters, around 200pts)": `[out:json][timeout:25];(nwr["amenity"="fuel"](around:300,${co(line200)});nwr["amenity"="cafe"](around:200,${co(line200)});nwr["shop"="bakery"](around:200,${co(line200)}););out center tags;`,
-  "fuel only, around 200pts": `[out:json][timeout:25];nwr["amenity"="fuel"](around:300,${co(line200)});out center tags;`,
-  "fuel only, around 60pts r600": `[out:json][timeout:25];nwr["amenity"="fuel"](around:600,${co(line60)});out center tags;`,
-  "fuel only, node+way bbox": `[out:json][timeout:25];(node["amenity"="fuel"](${bbox});way["amenity"="fuel"](${bbox}););out center tags;`,
-  "food (cafe|restaurant|fast_food|pub) bbox": `[out:json][timeout:25];(node["amenity"~"^(cafe|restaurant|fast_food|pub)$"](${bbox});way["amenity"~"^(cafe|restaurant|fast_food|pub)$"](${bbox}););out center tags;`,
-  "toilets bbox": `[out:json][timeout:25];(node["amenity"="toilets"](${bbox}););out center tags;`,
+const fuelAround = `[out:json][timeout:25];nwr["amenity"="fuel"](around:300,${co(line200)});out center tags;`;
+const fuelBox = `[out:json][timeout:25];(node["amenity"="fuel"](${bbox});way["amenity"="fuel"](${bbox}););out center tags;`;
+const UA_WEBVIEW = "Mozilla/5.0 (Linux; Android 14; SM-S911B Build/UP1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/129.0.0.0 Mobile Safari/537.36";
+const UA_CHROME = "Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36";
+const variants = {
+  "app (webview UA, Origin https://localhost)": { "User-Agent": UA_WEBVIEW, Origin: "https://localhost", Referer: "https://localhost/" },
+  "website (chrome UA, Origin github.io)": { "User-Agent": UA_CHROME, Origin: "https://crash1703.github.io", Referer: "https://crash1703.github.io/Forge-Starter/" },
+  "chrome UA, no Origin": { "User-Agent": UA_CHROME },
+  "app UA, Origin localhost, GET": { "User-Agent": UA_WEBVIEW, Origin: "https://localhost", get: true },
 };
-for (const [name, q] of Object.entries(queries)) {
-  console.log(`\n== ${name} (${q.length} chars)`);
-  for (const url of servers) {
-    const t0 = Date.now();
-    try {
-      const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 40000);
-      const r = await fetch(url, { method: "POST", signal: ctrl.signal, headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: ORIGIN }, body: `data=${encodeURIComponent(q)}` });
-      const text = await r.text(); clearTimeout(timer);
-      let n = "-", remark = "";
-      try { const j = JSON.parse(text); n = j.elements?.length; remark = j.remark || ""; } catch { remark = text.slice(0, 80).replace(/\s+/g, " "); }
-      console.log(`${new URL(url).host.padEnd(22)} ${r.status} ${String(Date.now() - t0).padStart(6)} ms  elements=${n}  cors=${r.headers.get("access-control-allow-origin")}  ${remark}`);
-    } catch (e) {
-      console.log(`${new URL(url).host.padEnd(22)} ERR ${String(Date.now() - t0).padStart(6)} ms  ${e.name}: ${e.message}`);
+const main = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
+for (const [vname, h] of Object.entries(variants)) {
+  for (const [qname, q] of Object.entries({ "fuel around": fuelAround, "fuel box": fuelBox })) {
+    console.log(`\n== ${vname} · ${qname}`);
+    for (const url of main) {
+      const t0 = Date.now();
+      try {
+        const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 30000);
+        const { get, ...headers } = h;
+        const r = get
+          ? await fetch(`${url}?data=${encodeURIComponent(q)}`, { signal: ctrl.signal, headers })
+          : await fetch(url, { method: "POST", signal: ctrl.signal, headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded" }, body: `data=${encodeURIComponent(q)}` });
+        const text = await r.text(); clearTimeout(timer);
+        let n = "-", remark = "";
+        try { const j = JSON.parse(text); n = j.elements?.length; remark = j.remark || ""; } catch { remark = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 140); }
+        console.log(`${new URL(url).host.padEnd(24)} ${r.status} ${String(Date.now() - t0).padStart(6)} ms  elements=${n}  cors=${r.headers.get("access-control-allow-origin")}  ${remark}`);
+      } catch (e) {
+        console.log(`${new URL(url).host.padEnd(24)} ERR ${String(Date.now() - t0).padStart(6)} ms  ${e.name}`);
+      }
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
 }
