@@ -94,6 +94,10 @@ const quickStyle = (theme: Props["theme"], onNewer: (s: StyleSpecification) => v
 };
 registerMapCache({ addProtocol });
 
+/** A teardrop pin, filled with the pin's colour (currentColor) and edged in white. */
+const PIN_SVG =
+  '<svg viewBox="0 0 32 42" width="32" height="42" aria-hidden="true"><path d="M16 40.5C16 40.5 2 25 2 15.5a14 14 0 0 1 28 0C30 25 16 40.5 16 40.5z" fill="currentColor" stroke="#fff" stroke-width="2.5"/></svg>';
+
 type Geo = FeatureCollection;
 const EMPTY: Geo = { type: "FeatureCollection", features: [] };
 const coords = (path: LatLng[]) => path.map((p) => [p.lng, p.lat]);
@@ -279,7 +283,8 @@ export default function MapView(props: Props) {
       let entry = markers.current.get(s.id);
       if (!entry) {
         const pin = document.createElement("div");
-        const marker = new Marker({ element: pin, draggable: true }).setLngLat([s.position.lng, s.position.lat]).addTo(m);
+        // A teardrop whose tip is the exact spot.
+        const marker = new Marker({ element: pin, draggable: true, anchor: "bottom" }).setLngLat([s.position.lng, s.position.lat]).addTo(m);
         // A drag ends with a click on the pin too; only a tap opens its card.
         let dragged = false;
         marker.on("dragstart", () => (dragged = true));
@@ -297,8 +302,14 @@ export default function MapView(props: Props) {
       }
       entry.marker.setLngLat([s.position.lng, s.position.lat]);
       entry.marker.setDraggable(!riding);
-      entry.el.className = `pin pin-${kind}`;
-      entry.el.textContent = kind === "start" ? "A" : kind === "end" ? "B" : String(i);
+      // Keep MapLibre's own classes on the element (position, anchor).
+      entry.el.classList.remove("pin-start", "pin-end", "pin-via");
+      entry.el.classList.add("pin", `pin-${kind}`);
+      const label = kind === "start" ? "A" : kind === "end" ? "B" : String(i);
+      if (entry.el.dataset.label !== label) {
+        entry.el.dataset.label = label;
+        entry.el.innerHTML = `${PIN_SVG}<span>${label}</span>`;
+      }
       entry.el.title = kind === "start" && props.loop ? `${s.label} (start and finish)` : s.label;
     });
     for (const [id, entry] of markers.current) {

@@ -40,7 +40,7 @@ import {
   twistScore,
   type LatLng,
 } from "./lib/geo";
-import { defaultOptions, planRoute, planSections, type RouteOptions, type RouteResult, type RouteStyle } from "./lib/routes";
+import { defaultOptions, planRoute, planSections, snapToRoad, type RouteOptions, type RouteResult, type RouteStyle } from "./lib/routes";
 import { elevationProfile, type ElevationProfile } from "./lib/elevation";
 import { reverseGeocode } from "./lib/places";
 import { parseGpx, sampleStops, toGpx } from "./lib/gpx";
@@ -109,6 +109,8 @@ export default function App() {
   const [routes, setRoutes] = useState<RouteResult[]>([]);
   const [selected, setSelected] = useState(0);
   const [busy, setBusy] = useState(false);
+  /** Pins being moved onto the nearest road; planning waits for them. */
+  const [snapping, setSnapping] = useState(0);
   const [error, setError] = useState("");
   const [profile, setProfile] = useState<ElevationProfile | null>(null);
   const [hover, setHover] = useState<LatLng | null>(null);
@@ -360,6 +362,8 @@ export default function App() {
       setError("");
       return;
     }
+    // A pin is on its way onto the road: plan once it's there.
+    if (snapping > 0) return;
     const ctrl = new AbortController();
     let replanning = false;
     /** Show newly planned routes. */
@@ -440,7 +444,7 @@ export default function App() {
     };
     // stopsKey captures the positions; labels changing must not re-route.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stopsKey, options]);
+  }, [stopsKey, options, snapping > 0]);
 
   useEffect(() => {
     setProfile(null);
@@ -493,15 +497,32 @@ export default function App() {
       next.splice(at ?? ss.length, 0, stop);
       return next;
     });
-    if (!label) labelStop(id, position);
+    // A spot tapped on the map goes onto the nearest road (a searched place stays where it is).
+    if (!label) placeOnRoad(id, position, true);
     if (at === undefined && stops.length <= 1) wantFit.current = true;
+  }
+
+  /**
+   * Move a pin the rider put down onto the nearest rideable road, as
+   * Calimoto does, then name it. Route planning waits for this, so the
+   * route is planned once, from the road.
+   */
+  function placeOnRoad(id: string, raw: LatLng, rename: boolean) {
+    setSnapping((n) => n + 1);
+    snapToRoad(raw, options)
+      .then((p) => {
+        // Only if the pin hasn't been moved again meanwhile.
+        setStops((ss) => ss.map((s) => (s.id === id && s.position.lat === raw.lat && s.position.lng === raw.lng ? { ...s, position: p } : s)));
+        if (rename) labelStop(id, p);
+      })
+      .finally(() => setSnapping((n) => n - 1));
   }
 
   function moveStop(id: string, position: LatLng) {
     // A name the rider gave stays; otherwise name the new spot.
     const named = stops.find((s) => s.id === id)?.named;
     setStops((ss) => ss.map((s) => (s.id === id ? { ...s, position, auto: false, ...(named ? {} : { label: "Locating…" }) } : s)));
-    if (!named) labelStop(id, position);
+    placeOnRoad(id, position, !named);
   }
 
   function reorder(from: number, to: number) {

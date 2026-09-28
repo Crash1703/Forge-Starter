@@ -569,6 +569,36 @@ export async function routeVia(
   };
 }
 
+/** How far a tapped or dragged pin may jump to reach a road. */
+const SNAP_REACH_M = 1000;
+
+/**
+ * The nearest point on a rideable road to `p` (the route server's
+ * locate), for pins the rider puts down by hand. Returns `p` unchanged if
+ * there's no road within reach or the server doesn't answer quickly.
+ */
+export async function snapToRoad(p: LatLng, opts: RouteOptions, signal?: AbortSignal): Promise<LatLng> {
+  try {
+    const timeout = AbortSignal.timeout(5000);
+    const res = await routerFetch(
+      "/locate",
+      { locations: [{ lat: p.lat, lon: p.lng }], costing: costing(opts).costing, verbose: false },
+      signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeout]) : (signal ?? timeout),
+    );
+    if (!res.ok) return p;
+    const json = (await res.json()) as { edges?: { correlated_lat: number; correlated_lon: number }[] }[];
+    let best: LatLng | null = null;
+    for (const e of json?.[0]?.edges ?? []) {
+      const q = { lat: e.correlated_lat, lng: e.correlated_lon };
+      if (Number.isFinite(q.lat) && Number.isFinite(q.lng) && (!best || distance(p, q) < distance(p, best))) best = q;
+    }
+    return best && distance(p, best) <= SNAP_REACH_M ? best : p;
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    return p;
+  }
+}
+
 /**
  * Speed limits along a route, in km/h per path point (null where the map
  * has none), from Valhalla's trace_attributes on the route's own geometry.
