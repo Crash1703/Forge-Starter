@@ -90,7 +90,7 @@ input[type="search"], input:not([type]), .save input, .card input {
 .brand h1 { font-size: 1.15rem; letter-spacing: 0.02em; }
 .logo { color: var(--accent); font-size: 1.2rem; }
 .tabs { margin-left: auto; display: flex; gap: 4px; }
-.tabs button { background: none; border: none; padding: 6px 10px; color: var(--muted); border-radius: 6px; }
+.tabs button { background: none; border: none; padding: 6px 10px; color: var(--muted); border-radius: 6px; white-space: nowrap; }
 .tabs button[aria-selected="true"] { background: var(--field); color: var(--text); font-weight: 600; }
 
 /* Search */
@@ -212,6 +212,25 @@ input[type="search"], input:not([type]), .save input, .card input {
 .fab { width: 52px; height: 52px; border-radius: 50%; padding: 0; display: grid; place-items: center; align-content: center; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); font-size: 1.3rem; line-height: 1; }
 .fab small { font-size: 0.6rem; color: var(--muted); margin-top: 2px; }
 
+/* Ride recording */
+.fab.rec span { color: #d8262b; font-size: 1.6rem; }
+.fab.rec.on { background: #d8262b; border-color: #d8262b; animation: rec-pulse 1.6s ease-in-out infinite; }
+.fab.rec.on span { color: #fff; font-size: 1.1rem; }
+@keyframes rec-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgb(216 38 43 / 0.5); } 50% { box-shadow: 0 0 0 10px rgb(216 38 43 / 0); } }
+.rec-pill { position: absolute; left: 12px; top: calc(var(--sat) + 12px); z-index: 3; display: flex; align-items: center; gap: 8px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 20px; padding: 8px 14px; font-weight: 600; font-size: 0.9rem; box-shadow: var(--shadow); font-variant-numeric: tabular-nums; }
+.rec-pill.riding { position: fixed; top: auto; bottom: calc(var(--sab) + 100px); z-index: 11; background: #111418; color: #f4f6f8; border-color: #111418; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #d8262b; animation: rec-blink 1.2s steps(2, start) infinite; }
+@keyframes rec-blink { to { visibility: hidden; } }
+.rec-confirm { position: absolute; left: 12px; right: 12px; top: calc(var(--sat) + 60px); z-index: 4; max-width: 420px; margin: 0 auto; display: grid; gap: 4px; background: var(--panel); border-radius: 16px; padding: 14px 16px; box-shadow: var(--shadow); }
+.rec-confirm span { color: var(--muted); font-size: 0.9rem; }
+button.danger { background: none; border-color: #d8262b; color: #d8262b; }
+.notice { background: var(--warn-bg); }
+.notice p { margin: 0; font-size: 0.9rem; }
+.ride-title { margin: 6px 0 0; font-size: 1.2rem; text-wrap: balance; }
+.back { padding: 0; min-height: 0; }
+.stats dd small { font-weight: 500; color: var(--muted); font-size: 0.75rem; }
+@media (prefers-reduced-motion: reduce) { .fab.rec.on, .rec-dot { animation: none; } }
+
 /* Where you are: a dot, or an arrow when the heading is known */
 .puck { width: 20px; height: 20px; border-radius: 50%; background: #2f7bff; border: 3px solid #fff; box-shadow: 0 0 0 6px rgb(47 123 255 / 0.25), 0 2px 6px rgb(0 0 0 / 0.4); }
 .puck.puck-heading { width: 30px; height: 34px; border: none; border-radius: 0; background: #2f7bff; clip-path: polygon(50% 0, 100% 100%, 50% 78%, 0 100%); box-shadow: none; filter: drop-shadow(0 0 2px #fff) drop-shadow(0 2px 4px rgb(0 0 0 / 0.5)); }
@@ -255,6 +274,8 @@ input[type="search"], input:not([type]), .save input, .card input {
 
 /* Narrow phones (or big system text): shrink the gauge and the Ride bar's parts */
 @media (max-width: 380px) {
+  .brand h1 { display: none; }
+  .tabs button { padding: 6px 8px; }
   .gauge-large svg { width: 64px; height: 37px; }
   .summary-text strong { font-size: 1.05rem; }
   .ride-next strong { font-size: 2rem; }
@@ -268,7 +289,7 @@ input[type="search"], input:not([type]), .save input, .card input {
 @media (max-width: 760px) {
   .app { display: block; }
   .map-wrap { position: fixed; inset: 0; }
-  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; border: none; border-radius: 18px 18px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.25); transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); will-change: transform; overflow: hidden; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; border: none; border-radius: 18px 18px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.25); transition: height 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); overflow: hidden; }
   .sheet.dragging { transition: none; }
   /* The panel's bottom edge runs behind the navigation bar; keep content above it. */
   .sheet { padding-bottom: var(--sab); }

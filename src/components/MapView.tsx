@@ -39,6 +39,10 @@ interface Props {
   me: LatLng | null;
   /** Set while riding; the planned routes and stop editing step aside. */
   ride: RideLayer | null;
+  /** A recorded ride being looked at in the logbook. */
+  track?: LatLng[] | null;
+  /** Faint lines of every recorded ride ("ghost lines"). */
+  history?: LatLng[][];
   onMapClick: (p: LatLng) => void;
   onStopMove: (id: string, p: LatLng) => void;
   onRouteClick: (p: LatLng, legIndex: number) => void;
@@ -49,6 +53,8 @@ interface Props {
 }
 
 const ALT = "#8a94a6";
+/** Recorded rides: a colour no planned route uses. */
+const RIDE_PURPLE = "#7b61ff";
 /** Route colour by twistiness: easy, curvy, twisty, very twisty. */
 export const TWIST_COLOURS = ["#f5a25d", "#ff6a13", "#e8363d", "#b0126b"];
 
@@ -94,7 +100,7 @@ export default function MapView(props: Props) {
   const markers = useRef(new globalThis.Map<string, { marker: Marker; el: HTMLDivElement }>());
   const puck = useRef<{ marker: Marker; el: HTMLDivElement } | null>(null);
   // Latest data for each source, so it can be re-applied after a style switch.
-  const data = useRef<Record<string, Geo>>({ alts: EMPTY, route: EMPTY, dots: EMPTY, hover: EMPTY, ride: EMPTY });
+  const data = useRef<Record<string, Geo>>({ history: EMPTY, track: EMPTY, alts: EMPTY, route: EMPTY, dots: EMPTY, hover: EMPTY, ride: EMPTY });
   // Handlers change every render; listeners read the latest through this ref.
   const cb = useRef(props);
   cb.current = props;
@@ -121,13 +127,16 @@ export default function MapView(props: Props) {
 
     // Our sources and layers, (re-)added whenever a map style finishes loading.
     m.on("style.load", () => {
-      for (const id of ["alts", "route", "dots", "hover", "ride"]) {
+      for (const id of ["history", "track", "alts", "route", "dots", "hover", "ride"]) {
         if (!m.getSource(id)) m.addSource(id, { type: "geojson", data: data.current[id] });
       }
       const round = { "line-cap": "round", "line-join": "round" } as const;
       const add = (layer: Parameters<MapLibre["addLayer"]>[0]) => {
         if (!m.getLayer(layer.id)) m.addLayer(layer);
       };
+      // Recorded rides sit underneath planned routes.
+      add({ id: "history", type: "line", source: "history", layout: round, paint: { "line-color": RIDE_PURPLE, "line-width": 3, "line-opacity": 0.35 } });
+      add({ id: "track", type: "line", source: "track", layout: round, paint: { "line-color": RIDE_PURPLE, "line-width": 6 } });
       add({ id: "alts", type: "line", source: "alts", layout: round, paint: { "line-color": ALT, "line-width": 5, "line-opacity": 0.8 } });
       add({ id: "route-casing", type: "line", source: "route", layout: round, paint: { "line-color": "#1b1f24", "line-width": 9, "line-opacity": 0.55 } });
       add({
@@ -192,9 +201,18 @@ export default function MapView(props: Props) {
     map.current?.setStyle(props.theme === "dark" ? MAP_STYLE_DARK : MAP_STYLE);
   }, [props.theme]);
 
+  // The last zoom-to-fit, so a padding change straight after can redo it.
+  const lastFit = useRef<{ bounds: LngLatBounds; at: number } | null>(null);
+
   // Keep the visible middle of the map above the planner panel.
   useEffect(() => {
-    map.current?.setPadding({ top: props.insetTop ?? 0, left: 0, right: 0, bottom: props.insetBottom });
+    const m = map.current;
+    if (!m) return;
+    m.setPadding({ top: props.insetTop ?? 0, left: 0, right: 0, bottom: props.insetBottom });
+    // setPadding stops any camera animation, including a fit that just started
+    // (the panel often moves at the same moment); redo it with the new padding.
+    const fit = lastFit.current;
+    if (fit && performance.now() - fit.at < 1500) m.fitBounds(fit.bounds, { padding: 50, duration: 400 });
   }, [props.insetBottom, props.insetTop]);
 
   // Stop markers (fixed in place while riding).
@@ -249,6 +267,16 @@ export default function MapView(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.routes, props.selected, !!props.ride]);
 
+  useEffect(() => {
+    setData("track", { type: "FeatureCollection", features: props.track && props.track.length > 1 ? [line(props.track)] : [] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.track]);
+
+  useEffect(() => {
+    setData("history", { type: "FeatureCollection", features: (props.history ?? []).filter((h) => h.length > 1).map((h) => line(h)) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.history]);
+
   // Ride mode: the road ahead in blue on top.
   useEffect(() => {
     const ahead = props.ride?.ahead ?? [];
@@ -301,7 +329,7 @@ export default function MapView(props: Props) {
   useEffect(() => {
     const m = map.current;
     if (!m || props.fitKey === 0) return;
-    const pts = props.routes[props.selected]?.path ?? props.stops.map((s) => s.position);
+    const pts = props.track?.length ? props.track : (props.routes[props.selected]?.path ?? props.stops.map((s) => s.position));
     if (!pts.length) return;
     if (pts.length === 1) {
       m.easeTo({ center: [pts[0].lng, pts[0].lat], zoom: Math.max(m.getZoom(), 12) });
@@ -309,6 +337,7 @@ export default function MapView(props: Props) {
     }
     const b = new LngLatBounds();
     pts.forEach((p) => b.extend([p.lng, p.lat]));
+    lastFit.current = { bounds: b, at: performance.now() };
     m.fitBounds(b, { padding: 50, duration: 600 });
     // Only fit on explicit requests, not on every route update.
     // eslint-disable-next-line react-hooks/exhaustive-deps

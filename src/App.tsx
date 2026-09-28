@@ -4,6 +4,10 @@ import MapView from "./components/MapView";
 import BottomSheet, { type Snap } from "./components/BottomSheet";
 import TwistGauge from "./components/TwistGauge";
 import RideView from "./components/RideView";
+import RidesPanel from "./components/RidesPanel";
+import { useRecording } from "./lib/useRecording";
+import { deleteRide, listRides } from "./lib/rideStore";
+import { trackPath, type RideRecord } from "./lib/recorder";
 import type { RideLayer } from "./components/MapView";
 import MapErrorBoundary from "./components/MapErrorBoundary";
 import PlaceSearch from "./components/PlaceSearch";
@@ -23,7 +27,7 @@ import {
 import { defaultOptions, planRoute, type RouteOptions, type RouteResult, type RouteStyle } from "./lib/routes";
 import { elevationProfile, type ElevationProfile } from "./lib/elevation";
 import { reverseGeocode } from "./lib/places";
-import { parseGpx, toGpx } from "./lib/gpx";
+import { parseGpx, sampleStops, toGpx } from "./lib/gpx";
 import { saveFile, shareableUrl, shareLink } from "./lib/native";
 import {
   decodeShare,
@@ -85,7 +89,18 @@ export default function App() {
   const [profile, setProfile] = useState<ElevationProfile | null>(null);
   const [hover, setHover] = useState<LatLng | null>(null);
   const [fitKey, setFitKey] = useState(0);
-  const [tab, setTab] = useState<"plan" | "saved">("plan");
+  const [tab, setTab] = useState<"plan" | "saved" | "rides">("plan");
+  const [rides, setRides] = useState<RideRecord[]>([]);
+  const [selectedRide, setSelectedRide] = useState<RideRecord | null>(null);
+  const [showHistory, setShowHistory] = useState(() => {
+    try {
+      return localStorage.getItem("forge.showRides") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [confirmStop, setConfirmStop] = useState(false);
+  const autoRecord = useRef(false);
   const [saved, setSaved] = useState<SavedRoute[]>(loadSaved);
   const [name, setName] = useState("");
   const [loopKm, setLoopKm] = useState(120);
@@ -172,6 +187,40 @@ export default function App() {
     setToast(msg);
     window.setTimeout(() => setToast(""), 2500);
   }, []);
+
+  const refreshRides = useCallback(() => {
+    listRides()
+      .then(setRides)
+      .catch(() => undefined);
+  }, []);
+  useEffect(refreshRides, [refreshRides]);
+
+  const recording = useRecording((ride) => {
+    refreshRides();
+    setSelectedRide(ride);
+    setTab("rides");
+    setSnap("half");
+    setFitKey((k) => k + 1);
+    flash(`Ride saved: ${formatDistance(ride.stats.distance)}`);
+  });
+
+  async function stopRecording(save: boolean) {
+    setConfirmStop(false);
+    autoRecord.current = false;
+    const tooShort = recording.state && recording.state.distance < recording.minMetres;
+    await recording.stop(save);
+    if (save && tooShort) flash("Too short to keep: rides under 200 m aren't saved");
+  }
+
+  const histories = useMemo(
+    // Every 4th point is plenty for faint background lines.
+    () => (showHistory ? rides.map((r) => trackPath(r.points).filter((_, i, a) => i % 4 === 0 || i === a.length - 1)) : []),
+    [rides, showHistory],
+  );
+  const selectedTrack = useMemo(
+    () => (tab === "rides" && selectedRide ? trackPath(selectedRide.points) : null),
+    [tab, selectedRide],
+  );
 
   // Recompute whenever the stops or options change (debounced so dragging feels calm).
   const stopsKey = stops.map((s) => `${s.position.lat},${s.position.lng}${s.auto ? "*" : ""}`).join("|");
@@ -325,6 +374,48 @@ export default function App() {
     );
   }
 
+  /** Ride mode for real: record the ride too, unless already recording. */
+  function startRide() {
+    if (!recording.state) {
+      recording.start(name.trim() || routeTitle());
+      autoRecord.current = true;
+    }
+    setRiding({ simulate: false });
+  }
+
+  function planAgain(ride: RideRecord) {
+    const plan = normalizeLoop(
+      sampleStops(trackPath(ride.points), 8).map((p) => ({ id: newId(), position: p, label: "Locating…" })),
+      options,
+    );
+    setStops(plan.stops);
+    setOptions(plan.options);
+    plan.stops.forEach((s) => labelStop(s.id, s.position));
+    setName(ride.name);
+    setSelectedRide(null);
+    setTab("plan");
+    wantFit.current = true;
+  }
+
+  function exportRide(ride: RideRecord) {
+    const track = trackPath(ride.points);
+    saveFile(
+      `${ride.name.replace(/[^\w-]+/g, "_").slice(0, 60) || "ride"}.gpx`,
+      toGpx({ name: ride.name, waypoints: [track[0], track[track.length - 1]], track }),
+      "application/gpx+xml",
+    ).catch(() => undefined);
+  }
+
+  function removeRide(ride: RideRecord) {
+    deleteRide(ride.id)
+      .then(() => {
+        setSelectedRide(null);
+        refreshRides();
+        flash("Ride deleted");
+      })
+      .catch(() => flash("Couldn't delete that ride"));
+  }
+
   function routeTitle() {
     const start = stops[0].label;
     return options.returnToStart ? `${start} loop` : `${start} → ${stops[stops.length - 1].label}`;
@@ -423,10 +514,25 @@ export default function App() {
           onExit={() => {
             setRiding(null);
             setRideLayer(null);
+            if (autoRecord.current) void stopRecording(true);
           }}
         />
       ) : (
       <BottomSheet snap={snap} onSnap={setSnap} onCover={setCover}>
+        {recording.unfinished && !recording.state && (
+          <section className="notice" role="status" data-peek>
+            <p>
+              An unfinished ride recording was found from{" "}
+              {new Date(recording.unfinished.startedAt).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}.
+            </p>
+            <div className="button-row">
+              <button className="primary" onClick={() => void recording.keepUnfinished()}>
+                Save ride
+              </button>
+              <button onClick={() => void recording.discardUnfinished()}>Discard</button>
+            </div>
+          </section>
+        )}
         {(route || busy) && (
           <section className="summary" aria-live="polite" data-peek>
             {busy && <div className="progress" />}
@@ -457,7 +563,7 @@ export default function App() {
                     ▷ Preview ride
                   </button>
                 </div>
-                <button className="ride-go primary" onClick={() => setRiding({ simulate: false })} disabled={busy}>
+                <button className="ride-go primary" onClick={startRide} disabled={busy}>
                   Ride
                 </button>
               </>
@@ -479,6 +585,9 @@ export default function App() {
             </button>
             <button role="tab" aria-selected={tab === "saved"} onClick={() => setTab("saved")}>
               Saved{saved.length ? ` (${saved.length})` : ""}
+            </button>
+            <button role="tab" aria-selected={tab === "rides"} onClick={() => setTab("rides")}>
+              Rides{rides.length ? ` (${rides.length})` : ""}
             </button>
           </nav>
         </header>
@@ -787,6 +896,28 @@ export default function App() {
               </section>
             )}
           </div>
+        ) : tab === "rides" ? (
+          <RidesPanel
+            rides={rides}
+            selected={selectedRide}
+            showHistory={showHistory}
+            onToggleHistory={(on) => {
+              setShowHistory(on);
+              try {
+                localStorage.setItem("forge.showRides", on ? "1" : "0");
+              } catch {
+                /* remembered for this visit */
+              }
+            }}
+            onSelect={(r) => {
+              setSelectedRide(r);
+              if (r) setFitKey((k) => k + 1);
+            }}
+            onDelete={removeRide}
+            onPlanAgain={planAgain}
+            onExport={exportRide}
+            onHover={setHover}
+          />
         ) : (
           <div className="scroll">
             <section>
@@ -853,6 +984,8 @@ export default function App() {
             insetBottom={riding ? 110 : cover}
             insetTop={riding ? 220 : 0}
             me={me}
+            track={selectedTrack}
+            history={histories}
             ride={riding ? (rideLayer ?? { ahead: route?.path ?? [], position: null, heading: null, follow: true }) : null}
             onFollowBroken={() => setFollowBreaks((n) => n + 1)}
             onMapReady={(m) => (mapRef.current = m)}
@@ -868,6 +1001,14 @@ export default function App() {
             <span aria-hidden>{themePref === "auto" ? "◐" : themePref === "light" ? "☀" : "☾"}</span>
             <small>{themePref === "auto" ? "Auto" : themePref === "light" ? "Day" : "Night"}</small>
           </button>
+          <button
+            className={`fab rec${recording.state ? " on" : ""}`}
+            onClick={() => (recording.state ? setConfirmStop(true) : recording.start())}
+            aria-label={recording.state ? "Stop recording" : "Record a ride"}
+            title={recording.state ? "Stop recording" : "Record a ride"}
+          >
+            <span aria-hidden>{recording.state ? "■" : "●"}</span>
+          </button>
           <button className="fab" onClick={centreOnMe} aria-label="Show my location">
             <span aria-hidden>◎</span>
           </button>
@@ -877,6 +1018,28 @@ export default function App() {
             </button>
           )}
         </div>
+        )}
+        {recording.state && (
+          <div className={`rec-pill${riding ? " riding" : ""}`} role="status">
+            <span className="rec-dot" aria-hidden /> REC {formatClock(recording.state.elapsed)} · {formatDistance(recording.state.distance)}
+          </div>
+        )}
+        {confirmStop && recording.state && (
+          <div className="rec-confirm" role="dialog" aria-label="Stop recording?">
+            <strong>Stop recording?</strong>
+            <span>
+              {formatDistance(recording.state.distance)} in {formatClock(recording.state.elapsed)}
+            </span>
+            <div className="button-row">
+              <button className="primary" onClick={() => void stopRecording(true)}>
+                Save ride
+              </button>
+              <button onClick={() => setConfirmStop(false)}>Keep recording</button>
+              <button className="danger" onClick={() => void stopRecording(false)}>
+                Discard
+              </button>
+            </div>
+          </div>
         )}
         {toast && <div className="toast">{toast}</div>}
       </main>
@@ -888,4 +1051,13 @@ export default function App() {
 function StopBadge({ index, count, loop }: { index: number; count: number; loop: boolean }) {
   const kind = index === 0 ? "start" : index === count - 1 && !loop ? "end" : "via";
   return <span className={`badge ${kind}`}>{kind === "start" ? "A" : kind === "end" ? "B" : index}</span>;
+}
+
+/** 1:05:09 or 5:09 */
+function formatClock(seconds: number): string {
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }

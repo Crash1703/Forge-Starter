@@ -117,7 +117,8 @@ export default function BottomSheet({ snap, onSnap, onCover, children }: Props) 
     <aside
       ref={sheet}
       className={`panel sheet${drag != null ? " dragging" : ""}`}
-      style={{ height: heights.full, transform: `translateY(${heights.full - visible}px)` }}
+      // Sized to what's visible (not slid off-screen), so everything inside can be scrolled into view at any height.
+      style={{ height: visible }}
       aria-label="Route planner"
     >
       <div

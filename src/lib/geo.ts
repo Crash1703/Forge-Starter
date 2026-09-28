@@ -385,6 +385,7 @@ export function formatDistance(m: number): string {
 }
 
 export function formatDuration(s: number): string {
+  if (s > 0 && s < 30) return "under 1 min";
   const h = Math.floor(s / 3600);
   const m = Math.round((s % 3600) / 60);
   return h ? `${h} h ${m.toString().padStart(2, "0")} min` : `${m} min`;
