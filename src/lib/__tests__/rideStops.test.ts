@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { destination, resample } from "../geo";
-import { boxesAlong, firstStretch, placesQuery, rankPlaces } from "../rideStops";
+import { firstStretch, knownPlaces, placesQuery, rankPlaces } from "../rideStops";
 
 const rider = { lat: -26.7, lng: 152.9 };
 const east = (m: number) => destination(rider, 90, m);
@@ -8,24 +8,14 @@ const line = resample([0, 5000, 10000, 15000, 20000].map(east), 250);
 const el = (id: number, p: { lat: number; lng: number }, tags: Record<string, string> = {}) => ({ type: "node", id, lat: p.lat, lon: p.lng, tags });
 
 describe("stops while riding", () => {
-  it("looks in a few small boxes along the road ahead and around the rider", () => {
+  it("looks along the road ahead the way the planner does, and around the rider", () => {
     const q = placesQuery("food", line, rider);
-    // 20 km of road: two 10 km boxes per filter, plus around the rider.
-    expect(q.match(/nwr\["amenity"~"\^\(cafe\|restaurant\|fast_food\|pub\)\$"\]\(-26\.\d+,152\.\d+,-26\.\d+,153?\.\d+\);/g)).toHaveLength(2);
+    expect(q).toContain('nwr["amenity"~"^(cafe|restaurant|fast_food|pub)$"](around:200,');
     expect(q).toContain('nwr["shop"="bakery"](around:3000,-26.70000,152.90000)');
+    expect(placesQuery("fuel", line, rider)).toContain('nwr["amenity"="fuel"](around:300,');
   });
 
-  it("boxes cover the road with a margin", () => {
-    const boxes = boxesAlong(line);
-    expect(boxes).toHaveLength(2);
-    const [s, w, n, e] = boxes[0];
-    expect(s).toBeLessThan(rider.lat);
-    expect(n).toBeGreaterThan(rider.lat);
-    expect(w).toBeLessThan(rider.lng);
-    expect(e).toBeGreaterThan(east(9000).lng);
-  });
-
-  it("drops places in a box's corner, away from the road and the rider", () => {
+  it("drops places away from both the road and the rider", () => {
     const far = rankPlaces([el(9, destination(east(15000), 0, 1800), { amenity: "fuel" })], "fuel", line, rider);
     expect(far).toEqual([]);
   });
@@ -51,5 +41,21 @@ describe("stops while riding", () => {
   it("takes just the first stretch of a long route", () => {
     const stretch = firstStretch([0, 5000, 10000, 15000].map(east), 7000);
     expect(stretch).toHaveLength(3);
+  });
+});
+
+describe("places the planner already found", () => {
+  const rider = { lat: -26.7, lng: 152.9 };
+  const east = (m: number) => destination(rider, 90, m);
+  const ahead = [0, 5000, 10000, 20000].map(east);
+  const known = [
+    { id: "a", kind: "fuel" as const, name: "Behind me", position: destination(rider, 270, 4000) },
+    { id: "b", kind: "fuel" as const, name: "Ampol", position: destination(east(8000), 0, 150) },
+    { id: "c", kind: "cafe" as const, name: "Maple 3", position: destination(east(3000), 0, 100) },
+  ];
+  it("lists the ones still ahead, for the right kind", () => {
+    expect(knownPlaces(known, "fuel", ahead, rider).map((p) => p.name)).toEqual(["Ampol"]);
+    expect(knownPlaces(known, "food", ahead, rider).map((p) => p.name)).toEqual(["Maple 3"]);
+    expect(knownPlaces(known, "lookout", ahead, rider)).toEqual([]);
   });
 });

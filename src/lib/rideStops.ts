@@ -28,8 +28,14 @@ const FILTERS: Record<RidePlaceKind, string[]> = {
   toilets: ['["amenity"="toilets"]'],
 };
 
-/** How far off the route ahead a place may be, and how far ahead to look. */
-const NEAR_ROUTE = 1000;
+/**
+ * How far off the road ahead to look, per kind: the same distances as the
+ * planner's "Find fuel & cafés", which the public server answers quickly.
+ * Wider searches along a long line are what made it time out.
+ */
+const NEAR_ROUTE: Record<RidePlaceKind, number> = { fuel: 300, food: 200, lookout: 500, toilets: 300 };
+/** Counted as "on the way" when this close to the road ahead. */
+const ON_THE_WAY = 600;
 const LOOK_AHEAD = 60_000;
 const AROUND_RIDER = 3000;
 
@@ -45,39 +51,13 @@ export function firstStretch(path: LatLng[], metres: number): LatLng[] {
   return out;
 }
 
-/**
- * Small boxes covering the road ahead, ~10 km of it each, with a margin of
- * NEAR_ROUTE. A few boxes are far quicker for the server than a search
- * along a long line; what's in a box corner but away from the road is
- * dropped afterwards.
- */
-export function boxesAlong(line: LatLng[], chunk = 10_000): [number, number, number, number][] {
-  const boxes: [number, number, number, number][] = [];
-  let start = 0;
-  let done = 0;
-  for (let i = 1; i <= line.length; i++) {
-    if (i < line.length) done += distance(line[i - 1], line[i]);
-    if (i === line.length || done >= chunk) {
-      const part = line.slice(start, Math.min(i + 1, line.length));
-      const lat = part.map((p) => p.lat);
-      const lng = part.map((p) => p.lng);
-      const padLat = NEAR_ROUTE / 110_540;
-      const padLng = NEAR_ROUTE / (111_320 * Math.cos((lat[0] * Math.PI) / 180));
-      boxes.push([Math.min(...lat) - padLat, Math.min(...lng) - padLng, Math.max(...lat) + padLat, Math.max(...lng) + padLng]);
-      start = i;
-      done = 0;
-    }
-  }
-  return boxes;
-}
-
 export function placesQuery(kind: RidePlaceKind, line: LatLng[], from: LatLng): string {
-  const boxes = line.length > 1 ? boxesAlong(line) : [];
+  const coords = line.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join(",");
   const parts = FILTERS[kind].flatMap((f) => [
-    ...boxes.map((b) => `nwr${f}(${b.map((v) => v.toFixed(4)).join(",")});`),
+    ...(line.length > 1 ? [`nwr${f}(around:${NEAR_ROUTE[kind]},${coords});`] : []),
     `nwr${f}(around:${AROUND_RIDER},${from.lat.toFixed(5)},${from.lng.toFixed(5)});`,
   ]);
-  return `[out:json][timeout:15];(${parts.join("")});out center tags 400;`;
+  return `[out:json][timeout:25];(${parts.join("")});out center tags;`;
 }
 
 /**
@@ -99,7 +79,7 @@ export function rankPlaces(elements: OverpassElement[], kind: RidePlaceKind, lin
     seen.add(id);
     const position = { lat, lng };
     let best = -1;
-    let bestD = NEAR_ROUTE * 1.2;
+    let bestD = ON_THE_WAY;
     for (let i = 0; i < line.length; i++) {
       const d = distance(line[i], position);
       if (d < bestD) {
@@ -108,7 +88,7 @@ export function rankPlaces(elements: OverpassElement[], kind: RidePlaceKind, lin
       }
     }
     const away = distance(from, position);
-    // In a box's corner, well away from the road and from the rider.
+    // Neither on the way nor near the rider.
     if (best < 0 && away > AROUND_RIDER * 1.1) continue;
     const tags = e.tags ?? {};
     out.push({
@@ -126,7 +106,36 @@ export function rankPlaces(elements: OverpassElement[], kind: RidePlaceKind, lin
 
 /** Places of `kind` along the next 60 km of the route (`ahead`) and around the rider. */
 export async function placesAhead(kind: RidePlaceKind, ahead: LatLng[], from: LatLng, signal?: AbortSignal): Promise<RidePlace[]> {
-  const stretch = firstStretch(ahead, LOOK_AHEAD);
-  const line = resample(stretch, Math.max(500, pathLength(stretch) / 120));
+  const line = aheadLine(ahead);
   return rankPlaces(await overpass(placesQuery(kind, line, from), signal), kind, line, from);
+}
+
+/** The road ahead as the lookup uses it: 60 km, thinned like the planner's (~200 points). */
+export function aheadLine(ahead: LatLng[]): LatLng[] {
+  const stretch = firstStretch(ahead, LOOK_AHEAD);
+  return resample(stretch, Math.max(400, pathLength(stretch) / 200));
+}
+
+/**
+ * Fuel stations and cafés already found in the planner ("Find fuel &
+ * cafés"), as places on the road ahead: no lookup needed.
+ */
+export function knownPlaces(
+  known: { id: string; kind: "fuel" | "cafe"; name: string; position: LatLng }[],
+  kind: RidePlaceKind,
+  ahead: LatLng[],
+  from: LatLng,
+): RidePlace[] {
+  const want = kind === "fuel" ? "fuel" : kind === "food" ? "cafe" : null;
+  if (!want) return [];
+  const elements = known
+    .filter((k) => k.kind === want)
+    .map((k) => ({ type: "known", id: 0, lat: k.position.lat, lon: k.position.lng, tags: { name: k.name }, key: k.id }));
+  // rankPlaces keys by type/id; give each its own.
+  return rankPlaces(
+    elements.map((e, i) => ({ ...e, id: i })),
+    kind,
+    aheadLine(ahead),
+    from,
+  ).filter((p) => p.ahead != null);
 }
