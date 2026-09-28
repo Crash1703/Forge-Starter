@@ -139,8 +139,10 @@ export default function App() {
     if (!fit || !route || busy) return;
     loopFit.current = null;
     const ratio = fit.targetSec / Math.max(60, route.duration);
-    if (ratio < 0.8 || ratio > 1.2) {
-      makeLoop(Math.min(800, Math.max(10, fit.km * ratio)));
+    // Close enough is fine: only resize when well off, and keep the same
+    // direction so the loop just grows or shrinks rather than changing.
+    if (ratio < 0.7 || ratio > 1.3) {
+      makeLoop(Math.min(800, Math.max(10, fit.km * ratio)), true);
       flash(`Resizing the loop to about ${formatDuration(fit.targetSec)}`);
     }
     // Runs when a freshly planned route arrives.
@@ -343,7 +345,10 @@ export default function App() {
     setStops((ss) => ss.filter((s) => s.id !== id));
   }
 
-  function makeLoop(km?: number) {
+  /** Direction (or side, for a loop via a place) of the last loop made, reused when resizing it. */
+  const loopShape = useRef<{ heading: number; side: 1 | -1 }>({ heading: 0, side: 1 });
+
+  function makeLoop(km?: number, sameShape = false) {
     const origin = stops[0];
     if (!origin) {
       flash("Set a start point first");
@@ -352,7 +357,9 @@ export default function App() {
     const length = km ?? (loopMode === "distance" ? loopKm : (loopMin / 60) * LOOP_KMH[options.style]);
     let via: Stop[];
     if (loopVia) {
-      const side = Math.random() < 0.5 ? 1 : -1; // a different way round each time
+      // A different way round each time, unless resizing.
+      const side = sameShape ? loopShape.current.side : Math.random() < 0.5 ? 1 : -1;
+      loopShape.current.side = side;
       const { waypoints, viaIndex } = loopThrough(origin.position, loopVia.position, length * 1000, side);
       via = waypoints.map((p, i) =>
         i === viaIndex
@@ -361,7 +368,12 @@ export default function App() {
       );
     } else {
       // A chosen direction still varies a little, so "another loop" differs.
-      const heading = loopDir == null ? Math.random() * 360 : (loopDir + Math.random() * 40 - 20 + 360) % 360;
+      const heading = sameShape
+        ? loopShape.current.heading
+        : loopDir == null
+          ? Math.random() * 360
+          : (loopDir + Math.random() * 40 - 20 + 360) % 360;
+      loopShape.current.heading = heading;
       via = roundTripWaypoints(origin.position, length * 1000, heading).map((p) => ({
         id: newId(),
         position: p,

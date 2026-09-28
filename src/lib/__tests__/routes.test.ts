@@ -184,6 +184,17 @@ describe("twisty helper points", () => {
     expect(distance(r.moves![0].to, foot)).toBeLessThan(40);
   });
 
+  it("moves a generated point whose dead end stops short of it", async () => {
+    // The pin is in a river 800 m past the end of the road the router picked.
+    const tip = destination(start, 90, 8000);
+    const foot = destination(tip, 180, 2500);
+    const pin = destination(tip, 45, 800);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ trip: tripAlong([start, foot, tip, foot, end], 25) }), { status: 200 })));
+    const [r] = await planRoute([{ pos: start }, { pos: pin, movable: true }, { pos: end }], defaultOptions);
+    expect(r.moves).toHaveLength(1);
+    expect(distance(r.moves![0].to, foot)).toBeLessThan(60);
+  });
+
   it("doesn't move the rider's own pins", async () => {
     const tip = destination(start, 90, 8000);
     const foot = destination(tip, 180, 500);

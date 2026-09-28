@@ -1,4 +1,4 @@
-import { avoidPoints, curviness, distance, midpointOffset, outAndBack, sharedRoad, spurBase, type LatLng } from "./geo";
+import { avoidPoints, curviness, distance, midpointOffset, findSpurs, outAndBack, sharedRoad, type LatLng } from "./geo";
 import { decodePolyline } from "./polyline";
 import { VALHALLA_URL } from "./config";
 
@@ -105,6 +105,9 @@ export class RoutingError extends Error {
 
 /** Riding more than this far up a road and back down it counts as a dead-end spur. */
 const SPUR_METRES = 100;
+
+/** A spur this close to a generated point (which snaps within 1 km) is put down to it. */
+const MOVE_REACH = 2000;
 
 export const spurWarning = (stop: number) =>
   `The route rides up and back down the same road to reach stop ${stop}. Move that pin onto a through road to avoid it.`;
@@ -379,13 +382,22 @@ export async function planRoute(
     const spurs = points
       .slice(1, -1)
       .flatMap((p, i) => (outAndBack(r.path, p.pos) > SPUR_METRES ? [spurWarning(i + 1)] : []));
-    const moves = points.slice(1, -1).flatMap((p, i) => {
-      if (!p.movable) return [];
-      const tip = reachedStop(r, i + 1) ?? p.pos;
-      if (outAndBack(r.path, tip) <= SPUR_METRES) return [];
-      const to = spurBase(r.path, tip);
-      return to ? [{ stop: i + 1, to }] : [];
-    });
+    // Each dead end the route rides up and back, blamed on the generated
+    // point that led it there: the one it reached nearest the spur's tip.
+    const moves: { stop: number; to: LatLng }[] = [];
+    for (const spur of findSpurs(r.path, SPUR_METRES)) {
+      let best = -1;
+      let bestDist = MOVE_REACH;
+      points.forEach((p, i) => {
+        if (!p.movable || i === 0 || i === points.length - 1 || moves.some((m) => m.stop === i)) return;
+        const d = Math.min(distance(p.pos, spur.tip), distance(reachedStop(r, i) ?? p.pos, spur.tip));
+        if (d < bestDist) {
+          best = i;
+          bestDist = d;
+        }
+      });
+      if (best > 0) moves.push({ stop: best, to: spur.base });
+    }
     return { ...r, warnings: spurs.length ? spurs : turnsAround ? [UTURN_WARNING] : [], ...(moves.length ? { moves } : {}) };
   };
   const results = baseRoutes.map((r, i) => withWarnings(toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, [])));
