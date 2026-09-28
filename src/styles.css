@@ -181,7 +181,7 @@ input[type="search"], input:not([type]), .save input, .card input {
 
 .toast { position: absolute; left: 50%; top: calc(var(--sat) + 16px); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 16px; border-radius: 20px; box-shadow: var(--shadow); font-size: 0.9rem; max-width: calc(100% - 32px); }
 
-.credits { padding: 8px 16px; font-size: 0.72rem; color: var(--muted); border-top: 1px solid var(--line); line-height: 1.5; }
+.credits { margin: 0; padding: 0 2px 16px; font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
 .credits a { color: inherit; }
 .pin { cursor: grab; }
 
@@ -289,6 +289,7 @@ button.danger { background: none; border-color: #d8262b; color: #d8262b; }
 .ride-round { width: 48px; height: 48px; border-radius: 50%; border: none; background: var(--ride-bg); color: var(--ride-text); font-size: 1.2rem; padding: 0; flex: none; }
 .ride-end { min-height: 48px; padding: 0 16px; border: none; border-radius: 24px; background: #d8262b; color: #fff; font-weight: 700; flex: none; }
 .map-wrap.riding .maplibregl-ctrl-bottom-right { display: none; }
+.maplibregl-ctrl-bottom-right { bottom: var(--cover, 0px); transition: bottom 0.2s; }
 .app.riding { grid-template-columns: 1fr; grid-template-areas: "map"; }
 @media (min-width: 761px) {
   .ride-bottom { max-width: 560px; }

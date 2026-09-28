@@ -1402,13 +1402,6 @@ export default function App() {
             )}
           </div>
         )}
-        <footer className="credits">
-          Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>{" "}
-          contributors · tiles <a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> · routing{" "}
-          <a href="https://valhalla.github.io/valhalla/" target="_blank" rel="noreferrer">Valhalla</a> (FOSSGIS) · search{" "}
-          <a href="https://photon.komoot.io" target="_blank" rel="noreferrer">Photon</a> · elevation{" "}
-          <a href="https://open-meteo.com" target="_blank" rel="noreferrer">Open-Meteo</a> · version {BUILD}
-        </footer>
       </BottomSheet>
       )}
 
@@ -1666,6 +1659,7 @@ export default function App() {
               flash("Search history deleted");
             }}
             onClose={() => setSettingsOpen(false)}
+            build={BUILD}
           />
         )}
         {loopScreen && (
