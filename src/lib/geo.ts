@@ -140,36 +140,71 @@ export function roundTripWaypoints(
   return out;
 }
 
+/** Ellipse perimeter (Ramanujan's approximation). */
+function ellipsePerimeter(a: number, b: number): number {
+  return Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b)));
+}
+
 /**
- * Waypoints for a loop from `start` that passes through `via`, roughly
- * `targetMetres` long by road. The loop is a circle through both points,
- * on the `side` (+1 left, -1 right) of the line between them; if `via` is
- * too far away for that length, the circle grows just enough to reach it.
- * Returns the waypoints in riding order with `via` among them (at `viaIndex`).
+ * Waypoints for a loop from `start` that passes through `via`: an oval with
+ * start and `via` at its ends, so the ride goes out one way, through the
+ * place, and comes back a different way (on the `side`, +1 left or -1
+ * right, going out). The oval widens to make the loop roughly
+ * `targetMetres` long by road; it never gets narrower than needed for the
+ * way back to be a different road, so a short target (or 0) gives the
+ * shortest sensible loop via the place. For a loop longer than a circle
+ * through both, it becomes a bigger circle with the place somewhere on it.
+ *
+ * Returns the waypoints in riding order with `via` among them (at
+ * `viaIndex`), and `minMetres`, the shortest loop via this place.
  */
 export function loopThrough(
   start: LatLng,
   via: LatLng,
   targetMetres: number,
   side: 1 | -1 = 1,
-  points = 3,
   roadFactor = 1.35,
-): { waypoints: LatLng[]; viaIndex: number } {
+): { waypoints: LatLng[]; viaIndex: number; minMetres: number } {
   const d = distance(start, via);
-  const radius = Math.max(targetMetres / roadFactor / (2 * Math.PI), (d / 2) * 1.05);
-  const toVia = bearing(start, via);
-  const mid = destination(start, toVia, d / 2);
-  const h = Math.sqrt(Math.max(0, radius * radius - (d / 2) * (d / 2)));
-  const centre = destination(mid, (toVia + (side > 0 ? 270 : 90)) % 360, h);
-  const startAngle = bearing(centre, start);
-  // Go round the circle in the direction that reaches `via` within the first lap.
-  const out: LatLng[] = [];
-  for (let i = 1; i <= points; i++) out.push(destination(centre, (startAngle + (360 * i * side) / (points + 1) + 360) % 360, radius));
-  // Swap in the real place for whichever generated point is nearest to it.
-  let viaIndex = 0;
-  for (let i = 1; i < out.length; i++) if (distance(out[i], via) < distance(out[viaIndex], via)) viaIndex = i;
-  out[viaIndex] = via;
-  return { waypoints: out, viaIndex };
+  const a = d / 2;
+  const narrowest = Math.min(a, Math.max(0.3 * a, 2000));
+  const minMetres = ellipsePerimeter(a, narrowest) * roadFactor;
+  // Widen until the oval is about the target length (bisection; a circle at most).
+  let lo = narrowest;
+  let hi = a;
+  const want = targetMetres / roadFactor;
+  if (want <= ellipsePerimeter(a, lo)) hi = lo;
+  else if (want >= ellipsePerimeter(a, hi)) lo = hi;
+  for (let k = 0; k < 30 && hi - lo > 10; k++) {
+    const mid = (lo + hi) / 2;
+    if (ellipsePerimeter(a, mid) < want) lo = mid;
+    else hi = mid;
+  }
+  const axis = bearing(start, via);
+  if (want > ellipsePerimeter(a, a) * 1.05) {
+    // Longer than a circle through both: a bigger circle, with the place
+    // somewhere on it, swapped in for the nearest of its points.
+    const radius = want / (2 * Math.PI);
+    const h = Math.sqrt(Math.max(0, radius * radius - a * a));
+    const centre = destination(destination(start, axis, a), (axis + (side > 0 ? 270 : 90)) % 360, h);
+    const from = bearing(centre, start);
+    const ring: LatLng[] = [];
+    for (let i = 1; i <= 5; i++) ring.push(destination(centre, (from + (360 * i * side) / 6 + 360) % 360, radius));
+    let viaIndex = 0;
+    for (let i = 1; i < ring.length; i++) if (distance(ring[i], via) < distance(ring[viaIndex], via)) viaIndex = i;
+    ring[viaIndex] = via;
+    return { waypoints: ring, viaIndex, minMetres };
+  }
+  const b = (lo + hi) / 2;
+  const centre = destination(start, axis, a);
+  // Angle 180° is the start, 0° the place; out on one side, back on the other.
+  const at = (deg: number) => {
+    const t = (deg * Math.PI) / 180;
+    const along = destination(centre, axis, a * Math.cos(t));
+    const across = b * Math.sin(t) * side;
+    return destination(along, (axis + (across >= 0 ? 270 : 90)) % 360, Math.abs(across));
+  };
+  return { waypoints: [at(120), at(60), via, at(-60), at(-120)], viaIndex: 2, minMetres };
 }
 
 /**
