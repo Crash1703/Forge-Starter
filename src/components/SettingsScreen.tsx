@@ -2,6 +2,8 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { clearFuelPrices, FUEL_CHOICES, loadFuelPrices, type FuelChoice } from "../lib/fuelPrices";
 import Icon from "./Icon";
+import { clearMapCache } from "../lib/mapCache";
+import { checkRouteServer, normaliseServer } from "../lib/routeServer";
 import type { Settings } from "../lib/settings";
 
 interface Props {
@@ -15,6 +17,27 @@ interface Props {
 export default function SettingsScreen({ settings: s, onChange, onClearSearches, onClose }: Props) {
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...s, [k]: v });
   const [check, setCheck] = useState<{ busy?: boolean; text: string; ok?: boolean } | null>(null);
+  const [server, setServer] = useState(s.routeServer);
+  const [serverCheck, setServerCheck] = useState<{ busy?: boolean; text: string; ok?: boolean } | null>(null);
+  const [mapCleared, setMapCleared] = useState(false);
+
+  async function useServer() {
+    const url = normaliseServer(server);
+    setServer(url);
+    if (!url) {
+      set("routeServer", "");
+      setServerCheck(null);
+      return;
+    }
+    setServerCheck({ busy: true, text: "Checking…" });
+    try {
+      const what = await checkRouteServer(url);
+      set("routeServer", url);
+      setServerCheck({ ok: true, text: `Working: ${what}. Routes are planned there now (the public server steps in if it's off).` });
+    } catch (e) {
+      setServerCheck({ text: (e as Error).message });
+    }
+  }
 
   async function checkToken() {
     setCheck({ busy: true, text: "Checking…" });
@@ -135,8 +158,54 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
           )}
         </div>
 
+        <h3 className="set-group">Route server</h3>
+        <div className="rt-rows">
+          <label className="set-row token-row">
+            <span>
+              <strong>Your own route server</strong>
+              <small>
+                {s.routeServer ? `Using ${s.routeServer}. ` : "Using the free public server. "}
+                A Valhalla server of your own (say, on a computer at home) plans much faster:{" "}
+                <a href="https://github.com/Crash1703/Forge-Starter/blob/main/docs/own-route-server.md" target="_blank" rel="noreferrer">
+                  how to set one up
+                </a>
+                . Leave empty for the public one.
+              </small>
+              <input
+                id="set-route-server"
+                type="url"
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="https://routes.example.com"
+                value={server}
+                onChange={(e) => {
+                  setServerCheck(null);
+                  setServer(e.target.value);
+                }}
+              />
+            </span>
+          </label>
+          <div className="set-row">
+            <button onClick={() => void useServer()} disabled={serverCheck?.busy || normaliseServer(server) === s.routeServer}>
+              {normaliseServer(server) ? "Check and use" : "Use the public server"}
+            </button>
+            {serverCheck && <small className={serverCheck.ok ? "ok-text" : serverCheck.busy ? "" : "error-text"}>{serverCheck.text}</small>}
+          </div>
+        </div>
+
         <button className="danger-link" onClick={onClearSearches}>
           Delete search history
+        </button>
+        <button
+          className="danger-link"
+          disabled={mapCleared}
+          onClick={() => {
+            void clearMapCache();
+            setMapCleared(true);
+          }}
+        >
+          {mapCleared ? "Saved map data deleted" : "Delete saved map data"}
         </button>
       </div>
     </div>,

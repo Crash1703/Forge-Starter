@@ -1,6 +1,6 @@
 import { avoidPoints, crossings, curviness, distance, findSpurs, midpointOffset, outAndBack, sharedRoad, type LatLng } from "./geo";
 import { decodePolyline } from "./polyline";
-import { VALHALLA_URL } from "./config";
+import { requestsAtOnce, routerFetch } from "./routeServer";
 
 export type RouteStyle = "fastest" | "scenic" | "twisty";
 export type Vehicle = "motorcycle" | "car";
@@ -206,12 +206,7 @@ async function computeRoutes(
   };
   let res: Response;
   try {
-    res = await fetch(`${VALHALLA_URL}/route`, {
-      method: "POST",
-      signal,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    res = await routerFetch("/route", body, signal);
   } catch (e) {
     if ((e as Error).name === "AbortError") throw e;
     throw new RoutingError("Couldn't reach the routing server. Check your connection and try again.");
@@ -404,6 +399,11 @@ export async function planRoute(
   signal?: AbortSignal,
   /** Roads to stay off (used when planning a loop one section at a time). */
   avoid: LatLng[] = [],
+  /**
+   * Called with a first, rough answer as soon as the router gives one, while
+   * loop clean-up and twistier detours are still being worked out.
+   */
+  onFirst?: (routes: RouteResult[]) => void,
 ): Promise<RouteResult[]> {
   const stops = points.map((p) => p.pos);
   if (stops.length > MAX_STOPS) throw new RoutingError(`A route can have at most ${MAX_STOPS} stops.`);
@@ -420,6 +420,11 @@ export async function planRoute(
     base = base.map((p) => ({ ...p, noUturn: false }));
     baseRoutes = await computeRoutes(base, opts, true, signal, avoid);
     turnsAround = true;
+  }
+  const moreToDo = opts.returnToStart || (opts.style === "twisty" && stops.length < MAX_STOPS);
+  if (onFirst && moreToDo) {
+    const first = baseRoutes.map((r, i) => toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, []));
+    onFirst(rank(first, points, opts));
   }
   const loop = opts.returnToStart
     ? async (trip: ValhallaTrip, pts: Waypoint[]) => uncrossLoop(await untangleLoop(trip, pts, opts, signal), pts, opts, signal)
@@ -488,43 +493,31 @@ export async function planRoute(
     const b = stops[leg + 1];
     if (distance(a, b) > 5000) {
       const variants = [0.2, -0.2, 0.35, -0.35].map((f) => midpointOffset(a, b, f));
-      // Sequential, not parallel: the public server rate-limits bursts.
-      for (const detour of variants) {
-        if (signal?.aborted) break;
+      const tryDetour = async (detour: LatLng): Promise<RouteResult | null> => {
         const pts = [...base.slice(0, leg + 1), { pos: detour, via: true, radius: HELPER_RADIUS }, ...base.slice(leg + 1)];
         try {
           const [r] = await computeRoutes(pts, opts, false, signal, avoid);
           const candidate = toResult(await loop(r, pts), "Detour", [detour]);
           // The helper point only exists to pull the route sideways. If
           // reaching it means riding up a dead end and back, drop this option.
-          if (outAndBack(candidate.path, detour) > SPUR_METRES) continue;
-          results.push(withWarnings(candidate));
+          return outAndBack(candidate.path, detour) > SPUR_METRES ? null : withWarnings(candidate);
         } catch (e) {
           if ((e as Error).name === "AbortError") throw e;
           // A detour point in a lake or on a mountain top just has no route; skip it.
+          return null;
         }
+      };
+      // A few at a time: quicker than one by one, without upsetting the
+      // public server (it refuses bigger bursts).
+      const atOnce = requestsAtOnce();
+      for (let i = 0; i < variants.length && !signal?.aborted; i += atOnce) {
+        const found = await Promise.all(variants.slice(i, i + atOnce).map(tryDetour));
+        results.push(...found.filter((r): r is RouteResult => !!r));
       }
     }
   }
 
-  const quickest = Math.min(...results.map((r) => r.duration));
-  const unique = results.filter(
-    (r, i) =>
-      r.duration <= quickest * 1.6 &&
-      !results.slice(0, i).some((o) => Math.abs(o.distance - r.distance) < r.distance * 0.01),
-  );
-  // A loop that crosses over itself rides a figure of eight; rank clean loops first.
-  const stopPositions = points.map((p) => p.pos);
-  const crossed = new Map(unique.map((r) => [r, opts.returnToStart ? crossings(r.path, null, stopPositions).length : 0]));
-  const byCrossings = (x: RouteResult, y: RouteResult) => crossed.get(x)! - crossed.get(y)!;
-  if (opts.style === "twisty") unique.sort((x, y) => byCrossings(x, y) || y.curviness - x.curviness);
-  else if (opts.style === "fastest") unique.sort((x, y) => byCrossings(x, y) || x.duration - y.duration);
-  else unique.sort(byCrossings);
-
-  return unique.map((r, i) => ({
-    ...r,
-    label: i === 0 ? (opts.style === "twisty" ? "Twistiest" : opts.style === "fastest" ? "Fastest" : "Recommended") : `Option ${i + 1}`,
-  }));
+  return rank(results, points, opts);
 }
 
 /**
@@ -583,17 +576,16 @@ export async function speedLimits(path: LatLng[], opts: RouteOptions, signal?: A
   // doesn't need every vertex. `k` maps sampled indices back to the path.
   const k = Math.max(1, Math.ceil(path.length / 1500));
   const shape = path.filter((_, i) => i % k === 0 || i === path.length - 1);
-  const res = await fetch(`${VALHALLA_URL}/trace_attributes`, {
-    method: "POST",
-    signal,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const res = await routerFetch(
+    "/trace_attributes",
+    {
       shape: shape.map((p) => ({ lat: p.lat, lon: p.lng })),
       costing: costing(opts).costing,
       shape_match: "map_snap",
       filters: { attributes: ["edge.speed_limit", "edge.begin_shape_index", "edge.end_shape_index"], action: "include" },
-    }),
-  });
+    },
+    signal,
+  );
   if (!res.ok) throw new RoutingError(`Speed limits unavailable (HTTP ${res.status})`);
   const json: { edges?: { speed_limit?: number | string; begin_shape_index?: number; end_shape_index?: number }[] } =
     await res.json();
@@ -607,6 +599,31 @@ export async function speedLimits(path: LatLng[], opts: RouteOptions, signal?: A
     for (let i = from; i <= to; i++) limits[i] = limit;
   }
   return limits;
+}
+
+/**
+ * Drop options much slower than the quickest and near-duplicates, then put
+ * the best first for the style (loops that don't cross themselves ahead).
+ */
+function rank(results: RouteResult[], points: RoutePoint[], opts: RouteOptions): RouteResult[] {
+  const quickest = Math.min(...results.map((r) => r.duration));
+  const unique = results.filter(
+    (r, i) =>
+      r.duration <= quickest * 1.6 &&
+      !results.slice(0, i).some((o) => Math.abs(o.distance - r.distance) < r.distance * 0.01),
+  );
+  // A loop that crosses over itself rides a figure of eight; rank clean loops first.
+  const stopPositions = points.map((p) => p.pos);
+  const crossed = new Map(unique.map((r) => [r, opts.returnToStart ? crossings(r.path, null, stopPositions).length : 0]));
+  const byCrossings = (x: RouteResult, y: RouteResult) => crossed.get(x)! - crossed.get(y)!;
+  if (opts.style === "twisty") unique.sort((x, y) => byCrossings(x, y) || y.curviness - x.curviness);
+  else if (opts.style === "fastest") unique.sort((x, y) => byCrossings(x, y) || x.duration - y.duration);
+  else unique.sort(byCrossings);
+
+  return unique.map((r, i) => ({
+    ...r,
+    label: i === 0 ? (opts.style === "twisty" ? "Twistiest" : opts.style === "fastest" ? "Fastest" : "Recommended") : `Option ${i + 1}`,
+  }));
 }
 
 /**

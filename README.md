@@ -36,7 +36,7 @@ Open http://localhost:5173. That's it: no keys needed.
 | Job | Service | Limits |
 | --- | --- | --- |
 | Map | [MapLibre GL](https://maplibre.org) with [OpenFreeMap](https://openfreemap.org) tiles | None for normal use |
-| Routing | [Valhalla](https://github.com/valhalla/valhalla) on the FOSSGIS public server | Fair use, about 1 request per second |
+| Routing | [Valhalla](https://github.com/valhalla/valhalla) on the FOSSGIS public server, or your own (Settings → Route server; see [docs/own-route-server.md](docs/own-route-server.md)) | Fair use, about 1 request per second |
 | Place search | [Photon](https://photon.komoot.io) by Komoot | Fair use |
 | Elevation and weather | [Open-Meteo](https://open-meteo.com) elevation and forecast APIs | 10,000 calls/day, non-commercial |
 | Places on the way and sights | [Overpass API](https://overpass-api.de) (OpenStreetMap data), asked together with the [maps.mail.ru](https://maps.mail.ru/osm/tools/overpass/) server (first answer wins, one retry, answers kept for 30 min) | Fair use; looked up only when you ask |
@@ -44,7 +44,9 @@ Open http://localhost:5173. That's it: no keys needed.
 | Terrain map | [OpenTopoMap](https://opentopomap.org) tiles | Light personal use; don't hammer it |
 | Sight photos | [Wikidata](https://www.wikidata.org) and [Wikimedia Commons](https://commons.wikimedia.org) | Free; photos are credited on Commons |
 
-The public servers are run by volunteers and non-profits. That's fine for personal use. For a public app with real traffic, run your own Valhalla and Photon (both have Docker images) or use a paid host, then point the app at them in `.env` (see `.env.example`).
+The public servers are run by volunteers and non-profits. That's fine for personal use. For a public app with real traffic, run your own Valhalla and Photon (both have Docker images) or use a paid host, then point the app at them in `.env` (see `.env.example`). A route server on a computer at home can also be set in the app itself: [docs/own-route-server.md](docs/own-route-server.md).
+
+Map styles are kept on the phone and refreshed in the background, and downloaded map tiles (only dated OpenFreeMap tiles, which never change) are kept too, up to about 4,000; Settings → Delete saved map data clears them.
 
 ## Scripts
 
