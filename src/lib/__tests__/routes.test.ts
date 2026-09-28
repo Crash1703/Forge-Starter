@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { destination, distance } from "../geo";
-import { costing, defaultOptions, planRoute, planSections, spurWarning, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
+import { costing, defaultOptions, planRoute, planSections, routeVia, spurWarning, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
 
 /** Encode points as a precision-6 polyline, the format Valhalla returns. */
 function encode6(pts: [number, number][]): string {
@@ -444,5 +444,46 @@ describe("loops don't cross themselves", () => {
     );
     const [r] = await planRoute([{ pos: A }, { pos: P1 }, { pos: P2 }, { pos: A }], { ...defaultOptions, returnToStart: true });
     expect(r.distance).toBe(44000);
+  });
+});
+
+describe("adding a stop while riding", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const from = { lat: -26.7, lng: 152.9 };
+  const stop = { name: "Shell Beerwah", position: destination(from, 90, 3000) };
+  const rejoin = destination(from, 90, 8000);
+  const legTo = (a: { lat: number; lng: number }, b: { lat: number; lng: number }, last: boolean) => ({
+    shape: encode6([[a.lat, a.lng], [b.lat, b.lng]]),
+    summary: { length: 3, time: 180 },
+    maneuvers: [
+      { type: 1, instruction: "Head east.", length: 3, begin_shape_index: 0 },
+      { type: last ? 4 : 5, instruction: "You have arrived.", length: 0, begin_shape_index: 1 },
+    ],
+  });
+
+  it("goes via the stop and back to the route, naming the stop", async () => {
+    const bodies: { locations: { heading?: number; radius?: number }[] }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: string, init: RequestInit) => {
+        bodies.push(JSON.parse(init.body as string));
+        return new Response(JSON.stringify({ trip: { summary: { length: 8, time: 480 }, legs: [legTo(from, stop.position, false), legTo(stop.position, rejoin, true)] } }));
+      }),
+    );
+    const r = await routeVia(from, 90, stop, rejoin, defaultOptions);
+    expect(bodies[0].locations).toHaveLength(3);
+    expect(bodies[0].locations[0].heading).toBe(90);
+    expect(bodies[0].locations[1].radius).toBe(50);
+    const named = r.steps.find((s) => s.instruction === "Shell Beerwah");
+    expect(named?.verbal).toBe("You've reached Shell Beerwah.");
+  });
+
+  it("can finish at the stop instead", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ trip: { summary: { length: 3, time: 180 }, legs: [legTo(from, stop.position, true)] } })));
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await routeVia(from, null, stop, null, defaultOptions);
+    const body = JSON.parse(((fetchMock.mock.calls[0] as unknown) as [string, RequestInit])[1].body as string);
+    expect(body.locations).toHaveLength(2);
+    expect(r.distance).toBe(3000);
   });
 });
