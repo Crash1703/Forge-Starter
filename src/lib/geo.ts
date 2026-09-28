@@ -298,6 +298,54 @@ export function findSpurs(path: LatLng[], minLength = 100, tolerance = 25): { ti
   return out;
 }
 
+/**
+ * Places where route `a` crosses route `b` (or itself, when `b` is omitted),
+ * ignoring anything within `radius` metres of the points in `ignore` (stops,
+ * where legs meet and roads naturally cross). Routes are compared as ~150 m
+ * segments, so parallel lanes or a road ridden twice don't count as crossing.
+ */
+export function crossings(a: LatLng[], b: LatLng[] | null, ignore: LatLng[] = [], radius = 400): LatLng[] {
+  const step = 150;
+  const pa = resample(a, step);
+  const pb = b ? resample(b, step) : pa;
+  if (pa.length < 2 || pb.length < 2) return [];
+  const lat0 = pa[0].lat;
+  const kx = 111320 * Math.cos(rad(lat0));
+  const ky = 110540;
+  const xy = (p: LatLng) => [p.lng * kx, p.lat * ky] as const;
+  const A = pa.map(xy);
+  const B = b ? pb.map(xy) : A;
+  const cross = (o: readonly number[], p: readonly number[], q: readonly number[]) => (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+  const hits: LatLng[] = [];
+  for (let i = 0; i < A.length - 1; i++) {
+    const [a1, a2] = [A[i], A[i + 1]];
+    const minX = Math.min(a1[0], a2[0]);
+    const maxX = Math.max(a1[0], a2[0]);
+    const minY = Math.min(a1[1], a2[1]);
+    const maxY = Math.max(a1[1], a2[1]);
+    // Against itself: skip neighbouring segments (they share a point).
+    for (let j = b ? 0 : i + 2; j < B.length - 1; j++) {
+      const [b1, b2] = [B[j], B[j + 1]];
+      if (Math.max(b1[0], b2[0]) < minX || Math.min(b1[0], b2[0]) > maxX || Math.max(b1[1], b2[1]) < minY || Math.min(b1[1], b2[1]) > maxY) continue;
+      const d1 = cross(b1, b2, a1);
+      const d2 = cross(b1, b2, a2);
+      const d3 = cross(a1, a2, b1);
+      const d4 = cross(a1, a2, b2);
+      // Roads meeting at a real angle, not one road ridden twice (nearly parallel).
+      const ux = a2[0] - a1[0];
+      const uy = a2[1] - a1[1];
+      const vx = b2[0] - b1[0];
+      const vy = b2[1] - b1[1];
+      const sin = Math.abs(ux * vy - uy * vx) / (Math.hypot(ux, uy) * Math.hypot(vx, vy) || 1);
+      if (d1 * d2 < 0 && d3 * d4 < 0 && sin > 0.3) {
+        const at = pa[i];
+        if (!ignore.some((s) => distance(s, at) < radius) && !hits.some((h) => distance(h, at) < 300)) hits.push(at);
+      }
+    }
+  }
+  return hits;
+}
+
 /** A 0–10 twistiness score from degrees of turning per km (the "Calimeter" idea). */
 export const twistScore = (curvinessDegPerKm: number) => Math.min(10, Math.max(0, curvinessDegPerKm / 20));
 

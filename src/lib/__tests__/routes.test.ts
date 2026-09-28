@@ -389,3 +389,60 @@ describe("per-section ride styles", () => {
     expect(r.legs).toHaveLength(2);
   });
 });
+
+describe("loops don't cross themselves", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const A = { lat: -26.8, lng: 153.0 };
+  const at = (e: number, n: number) => destination(destination(A, 90, e * 1000), 0, n * 1000);
+  const P1 = at(10, 0);
+  const P2 = at(10, 10);
+  const leg = (pts: { lat: number; lng: number }[], km: number) => ({
+    shape: encode6(pts.map((p) => [p.lat, p.lng])),
+    summary: { length: km, time: km * 60 },
+  });
+  const out = leg([A, P1], 10);
+  const across = leg([P2, at(5, -3), A], 24); // home across the way out
+  const around = leg([P2, at(0, 10), A], 20); // home round the other side
+  const trip = (legs: ReturnType<typeof leg>[]) => ({
+    summary: { length: legs.reduce((a, l) => a + l.summary.length, 0), time: legs.reduce((a, l) => a + l.summary.time, 0) },
+    legs,
+  });
+
+  it("re-plans a leg home that crosses the way out", async () => {
+    const bodies: { locations: { lat: number }[]; alternates?: number }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        bodies.push(body);
+        if (body.locations.length === 4) return new Response(JSON.stringify({ trip: trip([out, leg([P1, P2], 10), across]) }));
+        // The way home: the router's first choice crosses; its alternative doesn't.
+        if (Math.abs(body.locations[0].lat - P2.lat) < 1e-6) {
+          return new Response(JSON.stringify({ trip: trip([across]), alternates: body.alternates ? [{ trip: trip([around]) }] : [] }));
+        }
+        // The way out has no other road.
+        return new Response(JSON.stringify({ trip: trip([out]) }));
+      }),
+    );
+    const [r] = await planRoute([{ pos: A }, { pos: P1 }, { pos: P2 }, { pos: A }], { ...defaultOptions, returnToStart: true });
+    expect(r.distance).toBe(40000);
+    expect(bodies.some((b) => b.locations.length === 2 && b.alternates === 2)).toBe(true);
+  });
+
+  it("keeps a crossing when every other way is much slower", async () => {
+    const slow = leg([P2, at(0, 10), A], 60);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        if (body.locations.length === 4) return new Response(JSON.stringify({ trip: trip([out, leg([P1, P2], 10), across]) }));
+        if (Math.abs(body.locations[0].lat - P2.lat) < 1e-6) {
+          return new Response(JSON.stringify({ trip: trip([across]), alternates: body.alternates ? [{ trip: trip([slow]) }] : [] }));
+        }
+        return new Response(JSON.stringify({ trip: trip([out]) }));
+      }),
+    );
+    const [r] = await planRoute([{ pos: A }, { pos: P1 }, { pos: P2 }, { pos: A }], { ...defaultOptions, returnToStart: true });
+    expect(r.distance).toBe(44000);
+  });
+});

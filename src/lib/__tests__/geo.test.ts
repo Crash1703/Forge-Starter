@@ -9,6 +9,7 @@ import {
   formatDuration,
   midpointOffset,
   outAndBack,
+  crossings,
   findSpurs,
   loopLayout,
   loopThrough,
@@ -294,5 +295,29 @@ describe("loopLayout", () => {
     expect(stops.map((s) => s.index)).toEqual([1, 3]);
     expect(stops[0].shape).toEqual([ring[2]]);
     expect(stops[1].shape).toEqual([ring[4]]);
+  });
+});
+
+describe("crossings", () => {
+  const o = { lat: -26.7, lng: 152.9 };
+  const at = (e: number, n: number) => destination(destination(o, 90, e), 0, n);
+  it("finds where one route crosses another, but not at shared stops", () => {
+    const eastWest = [at(0, 0), at(10000, 0)];
+    const northSouth = [at(5000, -5000), at(5000, 5000)];
+    expect(crossings(eastWest, northSouth)).toHaveLength(1);
+    expect(crossings(eastWest, northSouth, [at(5000, 0)])).toHaveLength(0);
+    // Meeting end to end is not a crossing.
+    expect(crossings(eastWest, [at(10000, 0), at(10000, 5000)])).toHaveLength(0);
+  });
+
+  it("counts a figure of eight as crossing itself once", () => {
+    const eight = [at(0, 0), at(4000, 4000), at(8000, 0), at(4000, -4000), at(-4000, 4000), at(-8000, 0), at(-4000, -4000), at(0, 0)];
+    expect(crossings(eight, null)).toHaveLength(1);
+    const ring = [at(0, 0), at(4000, 4000), at(8000, 0), at(4000, -4000), at(0, 0)];
+    expect(crossings(ring, null)).toHaveLength(0);
+  });
+
+  it("doesn't count a road ridden out and back as crossing", () => {
+    expect(crossings([at(0, 0), at(5000, 0), at(0, 0)], null)).toHaveLength(0);
   });
 });
