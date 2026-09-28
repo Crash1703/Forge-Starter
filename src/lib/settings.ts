@@ -1,5 +1,6 @@
 import { setDisplayPrefs } from "./geo";
 import { setKeepRecentSearches } from "./places";
+import { FUEL_CHOICES, type FuelChoice } from "./fuelPrices";
 
 /** The rider's preferences, kept on the device. */
 export interface Settings {
@@ -17,6 +18,10 @@ export interface Settings {
   keepSearches: boolean;
   /** Mark home on the map. */
   showHome: boolean;
+  /** Fuel to show prices for. */
+  fuelType: FuelChoice;
+  /** The rider's own Queensland fuel price token (kept on this device only). */
+  fuelToken: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -27,6 +32,8 @@ export const DEFAULT_SETTINGS: Settings = {
   energySaving: false,
   keepSearches: true,
   showHome: true,
+  fuelType: "p95",
+  fuelToken: "",
 };
 
 const KEY = "forge.settings";
@@ -38,6 +45,8 @@ export function loadSettings(): Settings {
     if (["system", "light", "dark"].includes(raw.theme)) s.theme = raw.theme;
     if (["km", "mi"].includes(raw.units)) s.units = raw.units;
     if (["auto", "24", "12"].includes(raw.clock)) s.clock = raw.clock;
+    if (FUEL_CHOICES.some((c) => c.id === raw.fuelType)) s.fuelType = raw.fuelType;
+    if (typeof raw.fuelToken === "string") s.fuelToken = raw.fuelToken.trim();
     for (const k of ["smartVias", "energySaving", "keepSearches", "showHome"] as const) if (typeof raw[k] === "boolean") s[k] = raw[k];
     return s;
   } catch {

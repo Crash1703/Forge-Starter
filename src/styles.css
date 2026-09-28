@@ -515,3 +515,14 @@ button.primary:hover:not(:disabled) { filter: brightness(1.05); }
 @keyframes along-busy { from { opacity: 1; } to { opacity: 0.55; } }
 @media (prefers-reduced-motion: reduce) { .along-kind.busy { animation: none; } }
 .along-list button { justify-content: flex-start; }
+.token-row > span { width: 100%; }
+.token-row input { margin-top: 8px; width: 100%; }
+.ok-text { color: var(--start); }
+.error-text { color: var(--danger); }
+.price { font-weight: 700; font-variant-numeric: tabular-nums; }
+.price.cheapest { color: var(--start); }
+.price-age { color: var(--muted); font-size: 0.75rem; }
+.poi.priced { width: auto; padding: 0 6px 0 4px; border-radius: 14px; gap: 3px; display: flex; font-size: 0.75rem; font-weight: 700; }
+.poi.priced.cheapest { border-color: var(--start); background: #e7f7ee; }
+.token-row input { min-height: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--field); color: var(--text); font-size: 1rem; }
+.set-row > button { white-space: nowrap; flex: none; }

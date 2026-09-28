@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { createPortal } from "react-dom";
+import { clearFuelPrices, FUEL_CHOICES, loadFuelPrices, type FuelChoice } from "../lib/fuelPrices";
 import Icon from "./Icon";
 import type { Settings } from "../lib/settings";
 
@@ -12,6 +14,21 @@ interface Props {
 /** App settings: units, clock, how stops are placed, navigation, history. */
 export default function SettingsScreen({ settings: s, onChange, onClearSearches, onClose }: Props) {
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...s, [k]: v });
+  const [check, setCheck] = useState<{ busy?: boolean; text: string; ok?: boolean } | null>(null);
+
+  async function checkToken() {
+    setCheck({ busy: true, text: "Checking…" });
+    clearFuelPrices();
+    try {
+      const data = await loadFuelPrices(s.fuelToken);
+      let priced = 0;
+      const id = data.fuelIds.get(s.fuelType);
+      data.prices.forEach((m) => id != null && m.has(id) && priced++);
+      setCheck({ ok: true, text: `Working: ${data.sites.length.toLocaleString()} stations, ${priced.toLocaleString()} with ${FUEL_CHOICES.find((c) => c.id === s.fuelType)?.name} prices.` });
+    } catch (e) {
+      setCheck({ text: (e as Error).message });
+    }
+  }
   const toggle = (k: "smartVias" | "energySaving" | "keepSearches", title: string, hint: string) => (
     <label className="set-row">
       <span>
@@ -70,6 +87,52 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
             "Let the screen turn off while navigating; the voice still guides you (in the app; the website needs the screen on)",
           )}
           {toggle("keepSearches", "Remember searches", "Show recent places when you tap a search box")}
+        </div>
+
+        <h3 className="set-group">Fuel prices (Queensland)</h3>
+        <div className="rt-rows">
+          <label className="rt-row">
+            <span>Your fuel</span>
+            <select id="set-fuel" value={s.fuelType} onChange={(e) => set("fuelType", e.target.value as FuelChoice)}>
+              {FUEL_CHOICES.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="set-row token-row">
+            <span>
+              <strong>Price token</strong>
+              <small>
+                Free from{" "}
+                <a href="https://www.fuelpricesqld.com.au/" target="_blank" rel="noreferrer">
+                  fuelpricesqld.com.au
+                </a>{" "}
+                (sign up as a data consumer). Kept on this phone only.
+              </small>
+              <input
+                id="set-fuel-token"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="Paste your subscriber token"
+                value={s.fuelToken}
+                onChange={(e) => {
+                  setCheck(null);
+                  set("fuelToken", e.target.value.trim());
+                }}
+              />
+            </span>
+          </label>
+          {s.fuelToken && (
+            <div className="set-row">
+              <button onClick={() => void checkToken()} disabled={check?.busy}>
+                Check token
+              </button>
+              {check && <small className={check.ok ? "ok-text" : check.busy ? "" : "error-text"}>{check.text}</small>}
+            </div>
+          )}
         </div>
 
         <button className="danger-link" onClick={onClearSearches}>

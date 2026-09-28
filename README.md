@@ -14,7 +14,7 @@ A motorcycle-focused route planner in the spirit of Calimoto, built entirely on 
 - **Stop timeline**: the planner lists the route as a timeline: start, each leg with its ride style (tap to change it for that leg), distance and time, and a **+** to add a stop right there, then the stops and the finish. Each stop's **⋯** menu can show it on the map, make it the destination, start a round trip from it, move it or remove it. Longer lists fold into "N via points".
 - **Settings** (gear next to the title): kilometres or miles, 24 h or 12 h clock, light/dark/system theme, **Set via points intelligently** (new stops go where they add the least riding), energy-saving mode (the screen may sleep while navigating), and recent searches with **Delete search history**.
 - **Sights**: tap **Sights** on the map to show lookouts, waterfalls, attractions, landmarks and more in view, as photo bubbles where Wikipedia has a picture. Tap one to add it as a stop, plan a loop via it, or open its Wikipedia page. **Passes** shows mountain passes (with their height) the same way. The search button beside them jumps to the planner's search box, and the layers menu can hide your rides or home on the map.
-- **On the way**: buttons for **Fuel, Cafés, Food, Pubs, Toilets and Lookouts** look up that kind of place along the route (each is its own quick lookup), mark them on the map and list them by distance. With Fuel on, set your tank range and it warns about any stretch with no fuel for longer than that.
+- **On the way**: buttons for **Fuel, Cafés, Food, Pubs, Toilets and Lookouts** look up that kind of place along the route (each is its own quick lookup), mark them on the map and list them by distance. With Fuel on, set your tank range and it warns about any stretch with no fuel for longer than that. **Fuel prices (Queensland, in the app):** add your free token from [fuelpricesqld.com.au](https://www.fuelpricesqld.com.au/) (sign up as a data consumer) and pick your fuel in Settings. Fuel stations then show today's price from the Queensland Government's price reporting scheme, in the list, on the map and in Ride mode's ＋ Stop, with the cheapest highlighted and how long ago it was updated. The token stays on the phone.
 - **Per-section ride styles**: give each leg its own style (say, fast to the hills, twisty through them, then fast home) from the menu next to each stop. Styles are kept in share links.
 - **Backup and restore**: the **Saved** tab can download all saved routes and recorded rides as one file and restore it, so you can move them between the website and the app, or to a new phone. Restoring merges; it doesn't delete anything.
 - **Route details**: distance, riding time, a curviness rating, total climb, an elevation profile (hover it to see the spot on the map) and turn-by-turn directions.
@@ -40,6 +40,7 @@ Open http://localhost:5173. That's it: no keys needed.
 | Place search | [Photon](https://photon.komoot.io) by Komoot | Fair use |
 | Elevation and weather | [Open-Meteo](https://open-meteo.com) elevation and forecast APIs | 10,000 calls/day, non-commercial |
 | Places on the way and sights | [Overpass API](https://overpass-api.de) (OpenStreetMap data), asked together with the [maps.mail.ru](https://maps.mail.ru/osm/tools/overpass/) server (first answer wins, one retry, answers kept for 30 min) | Fair use; looked up only when you ask |
+| Fuel prices (Qld) | [Fuel Prices Queensland](https://www.fuelpricesqld.com.au/) API, called natively from the app | Free; needs your own data-consumer token |
 | Terrain map | [OpenTopoMap](https://opentopomap.org) tiles | Light personal use; don't hammer it |
 | Sight photos | [Wikidata](https://www.wikidata.org) and [Wikimedia Commons](https://commons.wikimedia.org) | Free; photos are credited on Commons |
 
@@ -116,6 +117,7 @@ src/
     pois.ts               Overpass fuel/café lookup and fuel gaps
     sights.ts             sights in view (Overpass) with photos (Wikidata/Commons)
     rideStops.ts          fuel, food, lookouts and toilets along the road ahead
+    fuelPrices.ts         Queensland fuel prices (government API, native HTTP)
     overpass.ts           Overpass queries: two servers at once, one retry, 30-minute memory
     settings.ts           the rider's settings
 ```
