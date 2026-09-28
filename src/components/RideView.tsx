@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import Icon from "./Icon";
 import ManeuverIcon from "./ManeuverIcon";
 import RideAddStop, { type AddMode } from "./RideAddStop";
 import type { RideLayer } from "./MapView";
@@ -278,11 +279,11 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
             }
           }}
         >
-          {muted ? "🔇" : "🔊"}
+          <Icon name={muted ? "mute" : "volume"} size={22} />
         </button>
         {!state?.arrived && (
           <button className="ride-round ride-pause" aria-label={paused ? "Resume ride" : "Pause ride"} aria-pressed={paused} onClick={() => void togglePause()}>
-            {paused ? "▶" : "⏸"}
+            <Icon name={paused ? "play" : "pause"} size={22} filled={paused} />
           </button>
         )}
 
@@ -290,10 +291,10 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
 
       {paused && (
         <div className="ride-paused" role="status">
-          <strong>⏸ Ride paused</strong>
+          <strong>Ride paused</strong>
           <span>Directions, voice{onPause ? " and recording" : ""} are on hold.</span>
           <button className="primary" onClick={() => void togglePause()}>
-            ▶ Resume
+            <Icon name="play" size={20} filled /> Resume
           </button>
         </div>
       )}
@@ -309,7 +310,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
 
       {!follow && (
         <button className="ride-recentre" onClick={() => setFollow(true)}>
-          ◎ Re-centre
+          <Icon name="locate" size={18} /> Re-centre
         </button>
       )}
 
@@ -329,7 +330,8 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
         </div>
         {!state?.arrived && !paused && (
           <button className="ride-addstop" aria-label="Add a stop" onClick={() => setAdding((a) => !a)} aria-expanded={adding}>
-            ＋<small>Stop</small>
+            <Icon name="plus" size={22} />
+            <small>Stop</small>
           </button>
         )}
         <button className="ride-end" onClick={onExit}>

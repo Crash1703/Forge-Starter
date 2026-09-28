@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import ElevationChart from "./ElevationChart";
+import Icon from "./Icon";
 import LineChart, { type ChartPoint } from "./LineChart";
 import { distance, formatDistance, formatDuration, type LatLng } from "../lib/geo";
 import { elevationProfile, type ElevationProfile } from "../lib/elevation";
@@ -158,8 +159,12 @@ function RideDetail({ ride, onSelect, onDelete, onPlanAgain, onExport, onHover }
       )}
       <section>
         <div className="button-row">
-          <button onClick={() => onPlanAgain(ride)}>↻ Plan this again</button>
-          <button onClick={() => onExport(ride)}>⤓ GPX</button>
+          <button onClick={() => onPlanAgain(ride)}>
+            <Icon name="loop" size={18} /> Plan this again
+          </button>
+          <button onClick={() => onExport(ride)}>
+            <Icon name="download" size={18} /> GPX
+          </button>
           {confirmDelete ? (
             <>
               <button className="danger" onClick={() => onDelete(ride)}>

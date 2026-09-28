@@ -26,17 +26,28 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0d1014;
-    --panel: #15191f;
-    --text: #e8ebef;
-    --muted: #9aa3b0;
-    --line: #262c35;
-    --field: #1d222a;
+  :root:not([data-theme="light"]) {
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --text: #eef1f4;
+    --muted: #98a1ad;
+    --line: #242a32;
+    --field: #1e232a;
     --warn-bg: #3a2c12;
-    --shadow: 0 8px 28px rgb(0 0 0 / 0.5);
+    --shadow: 0 10px 30px rgb(0 0 0 / 0.55);
     color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #0b0d10;
+  --panel: #14171c;
+  --text: #eef1f4;
+  --muted: #98a1ad;
+  --line: #242a32;
+  --field: #1e232a;
+  --warn-bg: #3a2c12;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.55);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -429,3 +440,25 @@ a.button { display: inline-flex; align-items: center; padding: 8px 12px; border:
 .ride-paused span { color: var(--ride-muted); }
 .ride-paused button { min-height: 56px; border-radius: 28px; border: none; font-size: 1.15rem; font-weight: 700; background: var(--accent); color: var(--accent-ink); margin-top: 6px; }
 .rec-pill.paused .rec-dot { animation: none; opacity: 0.5; }
+
+/* ---------- Polish: icons, buttons, cards ---------- */
+.icon { flex: none; display: inline-block; vertical-align: -0.2em; }
+button:has(> .icon), a.button:has(> .icon), label:has(> .icon) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+button { border-radius: 12px; min-height: 40px; padding: 8px 14px; border-color: transparent; transition: background-color 0.15s, border-color 0.15s, transform 0.08s; }
+button:active:not(:disabled) { transform: scale(0.98); }
+button:hover:not(:disabled) { border-color: var(--line); }
+button.primary:hover:not(:disabled) { filter: brightness(1.05); }
+.button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.fab { width: 52px; height: 52px; border: none; font-size: 1rem; color: var(--text); gap: 0; }
+.fab .icon + small { margin-top: 3px; }
+.fab.rec span { display: grid; place-items: center; }
+.chip-toggle { gap: 8px; }
+.summary-tools > button, .summary-actions > button { gap: 8px; }
+.layers-menu .layer-icon { color: var(--text); }
+.menu > button { gap: 12px; }
+.ride-round { display: grid; place-items: center; }
+.ride-addstop { display: grid; place-items: center; }
+.ride-paused button, .ride-recentre { gap: 8px; }
+.ride-add-kinds button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.screen-head .icon-btn, .screen-head .icon { color: var(--text); }
+.fab:has(> .icon), .ride-addstop:has(> .icon) { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }

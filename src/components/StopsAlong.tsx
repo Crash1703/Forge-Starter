@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Icon from "./Icon";
 import { formatDistance, type LatLng } from "../lib/geo";
 import type { RouteResult } from "../lib/routes";
 import { fuelGaps, poisAlong, type Poi } from "../lib/pois";
@@ -62,7 +63,11 @@ export default function StopsAlong({ route, onPois, onFocus }: Props) {
       {!pois ? (
         <>
           <button className="wide" onClick={find} disabled={busy}>
-            {busy ? "Looking along the route…" : "⛽ Find fuel & cafés"}
+            {busy ? "Looking along the route…" : (
+              <>
+                <Icon name="fuel" size={18} /> Find fuel &amp; cafés
+              </>
+            )}
           </button>
           {error && <p className="error">{error}</p>}
         </>
@@ -111,7 +116,7 @@ export default function StopsAlong({ route, onPois, onFocus }: Props) {
               {shown.map((p) => (
                 <li key={p.id}>
                   <button onClick={() => onFocus(p.position)}>
-                    <span aria-hidden>{p.kind === "fuel" ? "⛽" : "☕"}</span>
+                    <Icon name={p.kind === "fuel" ? "fuel" : "food"} size={18} />
                     <strong>{p.name}</strong>
                     <small>{formatDistance(p.at)}</small>
                   </button>

@@ -5,6 +5,7 @@ import BottomSheet, { type Snap } from "./components/BottomSheet";
 import TwistGauge from "./components/TwistGauge";
 import RideView from "./components/RideView";
 import RidesPanel from "./components/RidesPanel";
+import Icon, { type IconName } from "./components/Icon";
 import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
 import { MAX_SPAN, SIGHT_ICONS, SIGHT_NAMES, sightsIn, type Bounds, type Sight } from "./lib/sights";
 import WeatherStrip from "./components/WeatherStrip";
@@ -63,11 +64,11 @@ const BUILD = (import.meta.env.VITE_BUILD_ID as string | undefined)?.slice(0, 7)
 
 type MapTheme = "auto" | "light" | "dark" | "topo";
 
-const MAP_LAYERS: { id: MapTheme; name: string; hint: string; icon: string }[] = [
-  { id: "auto", name: "Automatic", hint: "Day map, dark after sunset", icon: "◐" },
-  { id: "light", name: "Day", hint: "Road map", icon: "☀" },
-  { id: "dark", name: "Night", hint: "Dark road map", icon: "☾" },
-  { id: "topo", name: "Terrain", hint: "Hills, contours and tracks", icon: "⛰" },
+const MAP_LAYERS: { id: MapTheme; name: string; hint: string; icon: IconName }[] = [
+  { id: "auto", name: "Automatic", hint: "Day map, dark after sunset", icon: "clock" },
+  { id: "light", name: "Day", hint: "Road map", icon: "map" },
+  { id: "dark", name: "Night", hint: "Dark road map", icon: "eye" },
+  { id: "topo", name: "Terrain", hint: "Hills, contours and tracks", icon: "mountain" },
 ];
 const THEME_KEY = "forge.mapTheme";
 const loadTheme = (): MapTheme => {
@@ -800,19 +801,21 @@ export default function App() {
                       </span>
                     ))}
                   <button className="link preview" onClick={() => setRiding({ simulate: true })} disabled={busy}>
-                    ▷ Preview ride
+                    <Icon name="play" size={14} filled /> Preview ride
                   </button>
                 </p>
                 <div className="summary-tools">
-                  <button onClick={customise}>✎ Customise</button>
+                  <button onClick={customise}>
+                    <Icon name="edit" size={18} /> Customise
+                  </button>
                   {isGeneratedLoop && (
                     <button onClick={() => makeLoop()} title="Same settings, a different loop">
-                      ⟳ Recalculate
+                      <Icon name="loop" size={18} /> Recalculate
                     </button>
                   )}
                   <div className="menu-wrap">
                     <button aria-expanded={menu === "avoid"} aria-haspopup="true" onClick={() => openMenu("avoid")}>
-                      Avoid{avoidCount ? ` (${avoidCount})` : ""} ▾
+                      Avoid{avoidCount ? ` (${avoidCount})` : ""} <Icon name="chevronDown" size={16} />
                     </button>
                     {menu === "avoid" && (
                       <div className="menu" role="group" aria-label="Avoid">
@@ -839,28 +842,28 @@ export default function App() {
                 </div>
                 <div className="summary-actions">
                   <button className="ride-go primary" onClick={startRide} disabled={busy}>
-                    ▲ Ride
+                    <Icon name="navigate" size={18} filled /> Ride
                   </button>
                   <button onClick={saveRoute} disabled={busy}>
                     Save
                   </button>
                   <div className="menu-wrap">
                     <button className="more" aria-label="More" aria-expanded={menu === "more"} aria-haspopup="true" onClick={() => openMenu("more")}>
-                      ⋯
+                      <Icon name="more" size={24} />
                     </button>
                     {menu === "more" && (
                       <div className="menu" role="menu">
                         <button role="menuitem" onClick={() => (setMenu(null), void share())}>
-                          ↗ Share
+                          <Icon name="share" size={18} /> Share
                         </button>
                         <button role="menuitem" onClick={() => (setMenu(null), exportGpx())}>
-                          ⤓ Export GPX
+                          <Icon name="download" size={18} /> Export GPX
                         </button>
                         <button role="menuitem" onClick={() => (setMenu(null), setRiding({ simulate: true }))}>
-                          ▷ Preview ride
+                          <Icon name="play" size={18} /> Preview ride
                         </button>
                         <button role="menuitem" onClick={() => (setMenu(null), setSnap("full"), setTab("plan"))}>
-                          ☰ Route details
+                          <Icon name="map" size={18} /> Route details
                         </button>
                       </div>
                     )}
@@ -981,10 +984,12 @@ export default function App() {
               )}
 
               <div className="button-row">
-                <button onClick={locateMe}>◎ My location</button>
+                <button onClick={locateMe}>
+                  <Icon name="locate" size={18} /> My location
+                </button>
                 {!endsAtHome && (
                   <button onClick={goHome} title={home ? `Add ${home.label}` : "Set your home location"}>
-                    ⌂ {home ? (stops.length ? "Ride home" : "From home") : "Set home"}
+                    <Icon name="home" size={18} /> {home ? (stops.length ? "Ride home" : "From home") : "Set home"}
                   </button>
                 )}
                 {stops.length > 1 && (
@@ -994,7 +999,7 @@ export default function App() {
                       setStops((ss) => reverseStops(ss, options.returnToStart))
                     }
                   >
-                    ⇅ Reverse
+                    <Icon name="swap" size={18} /> Reverse
                   </button>
                 )}
                 {stops.length > 0 && (
@@ -1060,11 +1065,11 @@ export default function App() {
               <p className="hint">A loop from your start, back home a different way.</p>
               <div className="button-row">
                 <button className="primary" onClick={openLoopScreen}>
-                  ↻ Plan a round trip
+                  <Icon name="loop" size={18} /> Plan a round trip
                 </button>
                 {isGeneratedLoop && (
                   <button onClick={() => makeLoop()} title="Same settings, a different loop">
-                    ⟳ Recalculate
+                    <Icon name="loop" size={18} /> Recalculate
                   </button>
                 )}
               </div>
@@ -1131,7 +1136,9 @@ export default function App() {
                       </button>
                     </div>
                     <div className="button-row">
-                      <button onClick={exportGpx}>⤓ GPX</button>
+                      <button onClick={exportGpx}>
+                        <Icon name="download" size={18} /> GPX
+                      </button>
                       <button onClick={share}>Share</button>
                       <button
                         onClick={() => {
@@ -1192,7 +1199,7 @@ export default function App() {
         ) : (
           <div className="scroll">
             <section className="home-card">
-              <h2>⌂ Home</h2>
+              <h2>Home</h2>
               {home ? (
                 <p className="home-label">
                   <strong>{home.label}</strong>
@@ -1218,14 +1225,14 @@ export default function App() {
                     )
                   }
                 >
-                  ◎ Where I am now
+                  <Icon name="locate" size={18} /> Where I am now
                 </button>
               </div>
               <PlaceSearch near={home?.position ?? center} placeholder="Search for your home address" onPick={(label, p) => setHome({ label, position: p })} />
             </section>
             <section>
               <button className="wide" onClick={() => fileInput.current?.click()}>
-                ⤒ Import GPX
+                <Icon name="up" size={18} /> Import GPX
               </button>
               <div className="button-row">
                 <button onClick={backUp}>Back up routes &amp; rides</button>
@@ -1328,7 +1335,7 @@ export default function App() {
                 setSight(null);
               }}
             >
-              <span aria-hidden>📷</span> Sights{sightsOn && <span aria-hidden> ✕</span>}
+              <Icon name="camera" size={18} /> Sights{sightsOn && <Icon name="close" size={16} />}
             </button>
             {sightsOn && sightsNote && <span className="chip-note">{sightsNote}</span>}
           </div>
@@ -1340,7 +1347,7 @@ export default function App() {
               {MAP_LAYERS.map((l) => (
                 <button key={l.id} role="radio" aria-checked={themePref === l.id} onClick={() => pickLayer(l.id)}>
                   <span className="layer-icon" aria-hidden>
-                    {l.icon}
+                    <Icon name={l.icon} size={20} />
                   </span>
                   <span>
                     <strong>{l.name}</strong>
@@ -1367,7 +1374,7 @@ export default function App() {
                     setSight(null);
                   }}
                 >
-                  ＋ Add as stop
+                  <Icon name="plus" size={18} /> Add as stop
                 </button>
                 <button
                   onClick={() => {
@@ -1376,7 +1383,7 @@ export default function App() {
                     openLoopScreen();
                   }}
                 >
-                  ↻ Loop via here
+                  <Icon name="loop" size={18} /> Loop via here
                 </button>
                 {sight.link && (
                   <a className="button" href={sight.link} target="_blank" rel="noreferrer">
@@ -1403,7 +1410,7 @@ export default function App() {
             aria-expanded={layersOpen}
             title="Map layers"
           >
-            <span aria-hidden>◇</span>
+            <Icon name="layers" size={22} />
             <small>{MAP_LAYERS.find((l) => l.id === themePref)?.name.replace("Automatic", "Auto")}</small>
           </button>
           <button
@@ -1412,17 +1419,17 @@ export default function App() {
             aria-label={recording.state ? "Stop recording" : "Record a ride"}
             title={recording.state ? "Stop recording" : "Record a ride"}
           >
-            <span aria-hidden>{recording.state ? "■" : "●"}</span>
+            <span aria-hidden>{recording.state ? <Icon name="stop" size={18} filled /> : "●"}</span>
           </button>
           <button className="fab" onClick={openLoopScreen} aria-label="Plan a round trip" title="Plan a round trip">
-            <span aria-hidden>↻</span>
+            <Icon name="loop" size={22} />
           </button>
           <button className="fab" onClick={centreOnMe} aria-label="Show my location">
-            <span aria-hidden>◎</span>
+            <Icon name="locate" size={22} />
           </button>
           {route && (
             <button className="fab" onClick={() => setFitKey((k) => k + 1)} aria-label="Zoom to route">
-              <span aria-hidden>⤢</span>
+              <Icon name="fit" size={22} />
             </button>
           )}
         </div>

@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom";
+import Icon from "./Icon";
 import PlaceSearch from "./PlaceSearch";
 import { formatDuration, type LatLng } from "../lib/geo";
 import type { RouteStyle } from "../lib/routes";
@@ -50,7 +51,7 @@ export default function RoundTripScreen(p: Props) {
     <div className="screen" role="dialog" aria-modal="true" aria-labelledby="rt-title">
       <header className="screen-head">
         <button className="icon" aria-label="Back to the map" onClick={p.onClose}>
-          ←
+          <Icon name="back" size={24} />
         </button>
         <h2 id="rt-title">Plan a round trip</h2>
       </header>
@@ -95,8 +96,8 @@ export default function RoundTripScreen(p: Props) {
           <label className="rt-row">
             <span>Start from</span>
             <select id="rt-start" value={p.start} onChange={(e) => p.onStart(e.target.value as LoopStart)}>
-              <option value="here">➤ Current location</option>
-              {p.home && <option value="home">⌂ Home · {p.home}</option>}
+              <option value="here">Current location</option>
+              {p.home && <option value="home">Home · {p.home}</option>}
               {p.firstStop && <option value="first">A · {p.firstStop}</option>}
             </select>
           </label>
@@ -131,7 +132,7 @@ export default function RoundTripScreen(p: Props) {
               <span className="chip">
                 {p.via.label}
                 <button aria-label={`Don't ride via ${p.via.label}`} onClick={() => p.onVia(null)}>
-                  ✕
+                  <Icon name="close" size={16} />
                 </button>
               </span>
             ) : (
