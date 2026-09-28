@@ -15,6 +15,8 @@ export interface Settings {
   energySaving: boolean;
   /** Keep recent place searches for quick picking. */
   keepSearches: boolean;
+  /** Mark home on the map. */
+  showHome: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   smartVias: true,
   energySaving: false,
   keepSearches: true,
+  showHome: true,
 };
 
 const KEY = "forge.settings";
@@ -35,7 +38,7 @@ export function loadSettings(): Settings {
     if (["system", "light", "dark"].includes(raw.theme)) s.theme = raw.theme;
     if (["km", "mi"].includes(raw.units)) s.units = raw.units;
     if (["auto", "24", "12"].includes(raw.clock)) s.clock = raw.clock;
-    for (const k of ["smartVias", "energySaving", "keepSearches"] as const) if (typeof raw[k] === "boolean") s[k] = raw[k];
+    for (const k of ["smartVias", "energySaving", "keepSearches", "showHome"] as const) if (typeof raw[k] === "boolean") s[k] = raw[k];
     return s;
   } catch {
     return { ...DEFAULT_SETTINGS };

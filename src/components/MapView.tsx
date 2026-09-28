@@ -7,7 +7,20 @@ import { distance, pathLength, twistSections, type LatLng } from "../lib/geo";
 import type { RouteResult } from "../lib/routes";
 import type { Stop } from "../lib/storage";
 import type { Poi } from "../lib/pois";
-import { SIGHT_ICONS, type Sight } from "../lib/sights";
+import { type Sight, type SightKind } from "../lib/sights";
+import { iconSvg, type IconName } from "./Icon";
+
+const SIGHT_ICON: Record<SightKind, IconName> = {
+  viewpoint: "eye",
+  attraction: "star",
+  museum: "star",
+  zoo: "star",
+  park: "star",
+  peak: "mountain",
+  waterfall: "eye",
+  historic: "flag",
+  pass: "mountain",
+};
 import { MAP_STYLE, MAP_STYLE_DARK, MAP_STYLE_TOPO } from "../lib/config";
 
 // MapLibre looks for its worker next to its own script, which bundling moves;
@@ -300,7 +313,7 @@ export default function MapView(props: Props) {
     poiMarkers.current = (props.ride ? [] : (props.pois ?? [])).map((p) => {
       const el = document.createElement("div");
       el.className = `poi poi-${p.kind}`;
-      el.textContent = p.kind === "fuel" ? "⛽" : "☕";
+      el.innerHTML = iconSvg(p.kind === "fuel" ? "fuel" : "food", 16);
       el.title = p.name;
       return new Marker({ element: el }).setLngLat([p.position.lng, p.position.lat]).addTo(m);
     });
@@ -314,7 +327,7 @@ export default function MapView(props: Props) {
     sightMarkers.current = (props.ride ? [] : (props.sights ?? [])).map((s) => {
       const el = document.createElement("button");
       el.type = "button";
-      el.className = `sight${s.photo ? " has-photo" : ""}`;
+      el.className = `sight${s.photo ? " has-photo" : ""}${s.kind === "pass" ? " pass" : ""}`;
       el.setAttribute("aria-label", s.name);
       el.title = s.name;
       if (s.photo) {
@@ -326,10 +339,10 @@ export default function MapView(props: Props) {
         img.onerror = () => {
           img.remove();
           el.classList.remove("has-photo");
-          el.textContent = SIGHT_ICONS[s.kind];
+          el.innerHTML = iconSvg(SIGHT_ICON[s.kind]);
         };
         el.appendChild(img);
-      } else el.textContent = SIGHT_ICONS[s.kind];
+      } else el.innerHTML = iconSvg(SIGHT_ICON[s.kind]);
       // A tap on a sight is not a tap on the map (which would add a stop).
       for (const ev of ["mousedown", "touchstart", "pointerdown", "dblclick"]) el.addEventListener(ev, (e) => e.stopPropagation());
       el.addEventListener("click", (e) => {
@@ -349,7 +362,7 @@ export default function MapView(props: Props) {
     if (!m || !props.home) return;
     const el = document.createElement("div");
     el.className = "home-pin";
-    el.textContent = "⌂";
+    el.innerHTML = iconSvg("home", 18);
     el.title = "Home";
     homeMarker.current = new Marker({ element: el }).setLngLat([props.home.lng, props.home.lat]).addTo(m);
   }, [props.home?.lat, props.home?.lng]);

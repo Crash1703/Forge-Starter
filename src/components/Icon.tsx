@@ -54,6 +54,11 @@ const PATHS = {
 
 export type IconName = keyof typeof PATHS;
 
+/** The same icon as SVG markup, for map markers built outside React. */
+export function iconSvg(name: IconName, size = 20): string {
+  return `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${PATHS[name]}"/></svg>`;
+}
+
 interface Props {
   name: IconName;
   size?: number;

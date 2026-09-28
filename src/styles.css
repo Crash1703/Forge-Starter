@@ -495,3 +495,12 @@ button.primary:hover:not(:disabled) { filter: brightness(1.05); }
 .danger-link { justify-self: start; background: none; color: var(--danger); padding: 8px 2px; font-weight: 600; }
 .suggestions.recent li span { color: var(--muted); }
 .brand .settings-btn { margin-left: 4px; width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 50%; background: transparent; color: var(--muted); }
+.chip-toggle.round { width: 44px; padding: 0; flex: none; }
+.map-chips { overflow-x: auto; scrollbar-width: none; padding: 2px 4px 8px 2px; margin: -2px -4px -8px -2px; }
+.map-chips::-webkit-scrollbar { display: none; }
+.chip-toggle { flex: none; }
+.sight.pass { border-color: #6b4f2a; color: #6b4f2a; }
+.home-pin { color: #fff; }
+.poi { color: #222; }
+.layers-toggles { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
+.layers-toggles .set-row { padding: 8px 10px; min-height: 52px; }

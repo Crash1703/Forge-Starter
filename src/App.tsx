@@ -11,7 +11,7 @@ import StopList from "./components/StopList";
 import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
 import { applySettings, loadSettings, storeSettings, type Settings } from "./lib/settings";
 import { clearRecentSearches } from "./lib/places";
-import { MAX_SPAN, SIGHT_ICONS, SIGHT_NAMES, sightsIn, type Bounds, type Sight } from "./lib/sights";
+import { MAX_SPAN, SIGHT_NAMES, sightsIn, type Bounds, type Sight } from "./lib/sights";
 import WeatherStrip from "./components/WeatherStrip";
 import StopsAlong from "./components/StopsAlong";
 import type { Poi } from "./lib/pois";
@@ -124,6 +124,7 @@ export default function App() {
   const [loopStart, setLoopStart] = useState<LoopStart>("here");
   const [locating, setLocating] = useState(false);
   const [sightsOn, setSightsOn] = useState(false);
+  const [passesOn, setPassesOn] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [home, setHomeState] = useState<Home | null>(loadHome);
   const [settings, setSettingsState] = useState<Settings>(loadSettings);
@@ -174,7 +175,7 @@ export default function App() {
   // Sights for the part of the map in view, re-checked as the map moves.
   useEffect(() => {
     const m = mapRef.current;
-    if (!sightsOn || !m) {
+    if ((!sightsOn && !passesOn) || !m) {
       setSights([]);
       setSightsNote("");
       return;
@@ -198,7 +199,7 @@ export default function App() {
       ctrl?.abort();
       ctrl = new AbortController();
       setSightsNote("Looking for sights…");
-      sightsIn(want, ctrl.signal)
+      sightsIn(want, ctrl.signal, { sights: sightsOn, passes: passesOn })
         .then((found) => {
           loaded = want;
           setSights(found);
@@ -217,7 +218,7 @@ export default function App() {
       clearTimeout(timer);
       ctrl?.abort();
     };
-  }, [sightsOn]);
+  }, [sightsOn, passesOn]);
 
   // Auto map theme: dark from dusk to dawn where the map is (checked every 5 minutes).
   useEffect(() => {
@@ -397,6 +398,15 @@ export default function App() {
   const labelStop = useCallback((id: string, p: LatLng) => {
     reverseGeocode(p).then((label) => setStops((ss) => ss.map((s) => (s.id === id ? { ...s, label } : s))));
   }, []);
+
+  function toggleHistory(on: boolean) {
+    setShowHistory(on);
+    try {
+      localStorage.setItem("forge.showRides", on ? "1" : "0");
+    } catch {
+      /* remembered for this visit */
+    }
+  }
 
   function changeSettings(s: Settings) {
     applySettings(s);
@@ -1190,14 +1200,7 @@ export default function App() {
             rides={rides}
             selected={selectedRide}
             showHistory={showHistory}
-            onToggleHistory={(on) => {
-              setShowHistory(on);
-              try {
-                localStorage.setItem("forge.showRides", on ? "1" : "0");
-              } catch {
-                /* remembered for this visit */
-              }
-            }}
+            onToggleHistory={toggleHistory}
             onSelect={(r) => {
               setSelectedRide(r);
               if (r) setFitKey((k) => k + 1);
@@ -1328,7 +1331,7 @@ export default function App() {
             onFollowBroken={() => setFollowBreaks((n) => n + 1)}
             onMapReady={(m) => (mapRef.current = m)}
             sights={sights}
-            home={home?.position ?? null}
+            home={settings.showHome ? (home?.position ?? null) : null}
             onSightClick={setSight}
             onMapClick={(p) => addStop(p)}
             onStopMove={moveStop}
@@ -1339,6 +1342,17 @@ export default function App() {
         {!riding && (
           <div className="map-chips">
             <button
+              className="chip-toggle round"
+              aria-label="Search for a place"
+              onClick={() => {
+                setTab("plan");
+                setSnap("full");
+                requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".plan-search input")?.focus());
+              }}
+            >
+              <Icon name="search" size={20} />
+            </button>
+            <button
               className="chip-toggle"
               aria-pressed={sightsOn}
               onClick={() => {
@@ -1348,7 +1362,17 @@ export default function App() {
             >
               <Icon name="camera" size={18} /> Sights{sightsOn && <Icon name="close" size={16} />}
             </button>
-            {sightsOn && sightsNote && <span className="chip-note">{sightsNote}</span>}
+            <button
+              className="chip-toggle"
+              aria-pressed={passesOn}
+              onClick={() => {
+                setPassesOn((on) => !on);
+                setSight(null);
+              }}
+            >
+              <Icon name="mountain" size={18} /> Passes{passesOn && <Icon name="close" size={16} />}
+            </button>
+            {(sightsOn || passesOn) && sightsNote && <span className="chip-note">{sightsNote}</span>}
           </div>
         )}
         {!riding && layersOpen && (
@@ -1366,6 +1390,28 @@ export default function App() {
                   </span>
                 </button>
               ))}
+              <div className="layers-toggles" role="group" aria-label="Show on the map">
+                <label className="set-row">
+                  <span>
+                    <strong>My rides</strong>
+                    <small>Recorded rides as faint lines</small>
+                  </span>
+                  <input type="checkbox" role="switch" className="switch" checked={showHistory} onChange={(e) => toggleHistory(e.target.checked)} />
+                </label>
+                <label className="set-row">
+                  <span>
+                    <strong>Home</strong>
+                    <small>{home ? home.label : "Set it in the Saved tab"}</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    className="switch"
+                    checked={settings.showHome}
+                    onChange={(e) => changeSettings({ ...settings, showHome: e.target.checked })}
+                  />
+                </label>
+              </div>
             </div>
           </>
         )}
@@ -1374,7 +1420,8 @@ export default function App() {
             {sight.photo && <img src={sight.photo.replace(/width=\d+/, "width=480")} alt="" />}
             <div className="sight-body">
               <small>
-                {SIGHT_ICONS[sight.kind]} {SIGHT_NAMES[sight.kind]}
+                {SIGHT_NAMES[sight.kind]}
+                {sight.ele != null ? ` · ${sight.ele.toLocaleString()} m` : ""}
               </small>
               <strong>{sight.name}</strong>
               <div className="button-row">

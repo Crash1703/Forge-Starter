@@ -2,7 +2,13 @@ import type { LatLng } from "./geo";
 import { WIKIDATA_URL } from "./config";
 import { overpass, type OverpassElement } from "./overpass";
 
-export type SightKind = "viewpoint" | "attraction" | "museum" | "zoo" | "park" | "peak" | "waterfall" | "historic";
+export type SightKind = "viewpoint" | "attraction" | "museum" | "zoo" | "park" | "peak" | "waterfall" | "historic" | "pass";
+
+/** What to show: sights, mountain passes, or both. */
+export interface SightLayers {
+  sights: boolean;
+  passes: boolean;
+}
 
 /** Something worth riding to: a lookout, a waterfall, a famous landmark. */
 export interface Sight {
@@ -15,6 +21,8 @@ export interface Sight {
   /** Its Wikipedia page, if it has one. */
   link?: string;
   wikidata?: string;
+  /** Height above sea level (m), for passes and peaks. */
+  ele?: number;
 }
 
 export interface Bounds {
@@ -33,6 +41,7 @@ export const SIGHT_ICONS: Record<SightKind, string> = {
   peak: "⛰",
   waterfall: "💧",
   historic: "🏰",
+  pass: "⛰",
 };
 
 export const SIGHT_NAMES: Record<SightKind, string> = {
@@ -44,23 +53,32 @@ export const SIGHT_NAMES: Record<SightKind, string> = {
   peak: "Mountain",
   waterfall: "Waterfall",
   historic: "Historic site",
+  pass: "Mountain pass",
 };
 
 /** Bigger than this (degrees across) and the query would be huge: ask the rider to zoom in. */
 export const MAX_SPAN = 1.2;
 
 
-export function sightsQuery(b: Bounds): string {
+export function sightsQuery(b: Bounds, layers: SightLayers = { sights: true, passes: false }): string {
   const box = `(${b.south.toFixed(4)},${b.west.toFixed(4)},${b.north.toFixed(4)},${b.east.toFixed(4)})`;
-  return `[out:json][timeout:25];(
-nwr["tourism"~"^(viewpoint|attraction|museum|zoo|theme_park)$"]["name"]${box};
-nwr["natural"="waterfall"]["name"]${box};
-nwr["natural"="peak"]["name"]["wikidata"]${box};
-nwr["historic"~"^(castle|monument|ruins|fort)$"]["name"]${box};
-);out center tags 300;`;
+  const parts = [
+    ...(layers.sights
+      ? [
+          `nwr["tourism"~"^(viewpoint|attraction|museum|zoo|theme_park)$"]["name"]${box};`,
+          `nwr["natural"="waterfall"]["name"]${box};`,
+          `nwr["natural"="peak"]["name"]["wikidata"]${box};`,
+          `nwr["historic"~"^(castle|monument|ruins|fort)$"]["name"]${box};`,
+        ]
+      : []),
+    // Passes: tagged on the road's highest point, or a named saddle.
+    ...(layers.passes ? [`node["mountain_pass"="yes"]${box};`, `node["natural"="saddle"]["name"]${box};`] : []),
+  ];
+  return `[out:json][timeout:25];(\n${parts.join("\n")}\n);out center tags 300;`;
 }
 
 function kindOf(tags: Record<string, string>): SightKind {
+  if (tags.mountain_pass === "yes" || tags.natural === "saddle") return "pass";
   switch (tags.tourism) {
     case "viewpoint":
       return "viewpoint";
@@ -96,7 +114,9 @@ export function parseSights(elements: OverpassElement[]): Sight[] {
     const lat = e.lat ?? e.center?.lat;
     const lng = e.lon ?? e.center?.lon;
     const tags = e.tags ?? {};
-    if (lat == null || lng == null || !tags.name) continue;
+    const pass = tags.mountain_pass === "yes" || tags.natural === "saddle";
+    // Unnamed passes are still worth a marker; name them by height.
+    if (lat == null || lng == null || (!tags.name && !pass)) continue;
     const id = `${e.type}/${e.id}`;
     // The same place is often mapped twice (a point and an area) with one name.
     const key = `${tags.name}|${lat.toFixed(2)},${lng.toFixed(2)}`;
@@ -107,11 +127,12 @@ export function parseSights(elements: OverpassElement[]): Sight[] {
     out.push({
       id,
       kind: kindOf(tags),
-      name: tags.name,
+      name: tags.name || (tags.ele ? `Pass, ${Math.round(parseFloat(tags.ele))} m` : "Mountain pass"),
       position: { lat, lng },
       ...(commons ? { photo: commonsThumb(commons) } : {}),
       ...(wikipediaLink(tags.wikipedia) ? { link: wikipediaLink(tags.wikipedia) } : {}),
       ...(tags.wikidata ? { wikidata: tags.wikidata } : {}),
+      ...(Number.isFinite(parseFloat(tags.ele)) ? { ele: Math.round(parseFloat(tags.ele)) } : {}),
     });
   }
   return out;
@@ -126,6 +147,7 @@ const KIND_RANK: Record<SightKind, number> = {
   zoo: 5,
   park: 6,
   museum: 7,
+  pass: 0,
 };
 
 /**
@@ -169,8 +191,10 @@ export async function addPhotos(sights: Sight[], signal?: AbortSignal): Promise<
 }
 
 /** Sights within `b`: the best 40, with photos where Wikidata has them. */
-export async function sightsIn(b: Bounds, signal?: AbortSignal): Promise<Sight[]> {
-  const best = rankSights(parseSights(await overpass(sightsQuery(b), signal)));
+export async function sightsIn(b: Bounds, signal?: AbortSignal, layers: SightLayers = { sights: true, passes: false }): Promise<Sight[]> {
+  const found = parseSights(await overpass(sightsQuery(b, layers), signal));
+  // Passes are few and each matters to a rider: keep them all, and rank the rest.
+  const best = [...found.filter((x) => x.kind === "pass"), ...rankSights(found.filter((x) => x.kind !== "pass"))];
   try {
     return await addPhotos(best, signal);
   } catch (e) {

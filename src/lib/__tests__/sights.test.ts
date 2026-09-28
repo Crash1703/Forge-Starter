@@ -69,3 +69,24 @@ describe("sights", () => {
     expect(other.photo).toBeUndefined();
   });
 });
+
+describe("mountain passes", () => {
+  it("asks only for passes when that's all that's on", () => {
+    const q = sightsQuery({ south: -27, west: 152.5, north: -26.5, east: 153 }, { sights: false, passes: true });
+    expect(q).toContain('node["mountain_pass"="yes"]');
+    expect(q).not.toContain("tourism");
+  });
+
+  it("reads passes, naming unnamed ones by height", () => {
+    const sights = parseSights([
+      el(1, { mountain_pass: "yes", name: "Stelvio Pass", ele: "2757" }),
+      el(2, { mountain_pass: "yes", ele: "1180.5" }, -26.8, 152.8),
+      el(3, { mountain_pass: "yes" }, -26.9, 152.7),
+    ]);
+    expect(sights.map((s) => [s.name, s.kind, s.ele])).toEqual([
+      ["Stelvio Pass", "pass", 2757],
+      ["Pass, 1181 m", "pass", 1181],
+      ["Mountain pass", "pass", undefined],
+    ]);
+  });
+});
