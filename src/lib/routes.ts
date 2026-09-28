@@ -399,11 +399,6 @@ export async function planRoute(
   signal?: AbortSignal,
   /** Roads to stay off (used when planning a loop one section at a time). */
   avoid: LatLng[] = [],
-  /**
-   * Called with a first, rough answer as soon as the router gives one, while
-   * loop clean-up and twistier detours are still being worked out.
-   */
-  onFirst?: (routes: RouteResult[]) => void,
 ): Promise<RouteResult[]> {
   const stops = points.map((p) => p.pos);
   if (stops.length > MAX_STOPS) throw new RoutingError(`A route can have at most ${MAX_STOPS} stops.`);
@@ -420,11 +415,6 @@ export async function planRoute(
     base = base.map((p) => ({ ...p, noUturn: false }));
     baseRoutes = await computeRoutes(base, opts, true, signal, avoid);
     turnsAround = true;
-  }
-  const moreToDo = opts.returnToStart || (opts.style === "twisty" && stops.length < MAX_STOPS);
-  if (onFirst && moreToDo) {
-    const first = baseRoutes.map((r, i) => toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, []));
-    onFirst(rank(first, points, opts));
   }
   const loop = opts.returnToStart
     ? async (trip: ValhallaTrip, pts: Waypoint[]) => uncrossLoop(await untangleLoop(trip, pts, opts, signal), pts, opts, signal)

@@ -160,7 +160,7 @@ describe("twisty helper points", () => {
     expect(detourSides.every((s) => s < 0)).toBe(true);
   });
 
-  it("asks for two detours at a time, after showing the plain route first", async () => {
+  it("asks for two detours at a time", async () => {
     let open = 0;
     let most = 0;
     let calls = 0;
@@ -175,19 +175,9 @@ describe("twisty helper points", () => {
         return new Response(JSON.stringify({ trip: tripAlong([start, end], 20 + calls) }), { status: 200 });
       }),
     );
-    const first = vi.fn();
-    await planRoute([{ pos: start }, { pos: end }], { ...defaultOptions, style: "twisty" }, undefined, [], first);
-    expect(first).toHaveBeenCalledTimes(1);
-    expect(first.mock.calls[0][0]).toHaveLength(1);
+    await planRoute([{ pos: start }, { pos: end }], { ...defaultOptions, style: "twisty" });
     expect(calls).toBe(5);
     expect(most).toBe(2);
-  });
-
-  it("doesn't send a first answer when there's nothing more to work out", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ trip: tripAlong([start, end], 20) }), { status: 200 })));
-    const first = vi.fn();
-    await planRoute([{ pos: start }, { pos: end }], { ...defaultOptions, style: "fastest" }, undefined, [], first);
-    expect(first).not.toHaveBeenCalled();
   });
 
   it("names a stop the route has to ride up and back to reach", async () => {
@@ -324,15 +314,6 @@ describe("loops come home a different way", () => {
     expect(legBody.exclude_locations!.length).toBeLessThanOrEqual(50);
     expect(r.distance).toBe(66000);
     expect(r.legs).toEqual([{ distance: 30000, duration: 1800 }, { distance: 36000, duration: 2160 }]);
-  });
-
-  it("shows the loop as first planned while the way home is re-planned", async () => {
-    stubRouter("ok");
-    const first = vi.fn();
-    const [r] = await planRoute(loopPoints, { ...defaultOptions, returnToStart: true }, undefined, [], first);
-    expect(first).toHaveBeenCalledTimes(1);
-    expect(first.mock.calls[0][0][0].distance).toBe(60000);
-    expect(r.distance).toBe(66000);
   });
 
   it("keeps the original way home when there's no other road", async () => {

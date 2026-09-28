@@ -107,9 +107,6 @@ export default function App() {
   const [routes, setRoutes] = useState<RouteResult[]>([]);
   const [selected, setSelected] = useState(0);
   const [busy, setBusy] = useState(false);
-  /** A first route is showing; a better one (loop clean-up, twistier detours) is on its way. */
-  const [refining, setRefining] = useState(false);
-  const planCtrl = useRef<AbortController | null>(null);
   const [error, setError] = useState("");
   const [profile, setProfile] = useState<ElevationProfile | null>(null);
   const [hover, setHover] = useState<LatLng | null>(null);
@@ -174,7 +171,7 @@ export default function App() {
 
   useEffect(() => {
     const fit = loopFit.current;
-    if (!fit || !route || busy || refining) return;
+    if (!fit || !route || busy) return;
     loopFit.current = null;
     const ratio = fit.targetSec / Math.max(60, route.duration);
     // Close enough is fine: only resize when well off, and keep the same
@@ -185,7 +182,7 @@ export default function App() {
     }
     // Runs when a freshly planned route arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route, busy, refining]);
+  }, [route, busy]);
 
   // Sights for the part of the map in view, re-checked as the map moves.
   useEffect(() => {
@@ -346,7 +343,6 @@ export default function App() {
     .map((s) => `${s.position.lat},${s.position.lng}${s.auto ? "*" : ""}${s.legStyle ?? ""}${(s.shape ?? []).map((p) => `/${p.lat},${p.lng}`).join("")}`)
     .join("|");
   useEffect(() => {
-    setRefining(false);
     if (stops.length < 2) {
       setRoutes([]);
       setProfile(null);
@@ -354,9 +350,8 @@ export default function App() {
       return;
     }
     const ctrl = new AbortController();
-    planCtrl.current = ctrl;
     let replanning = false;
-    /** Show routes: a first rough answer, or the finished one. */
+    /** Show newly planned routes. */
     const show = (r: RouteResult[]) => {
       setRoutes(r);
       setSnap((s) => (s === "peek" ? "half" : s));
@@ -397,13 +392,7 @@ export default function App() {
         return;
       }
       setBusy(true);
-      const first = (r: RouteResult[]) => {
-        if (ctrl.signal.aborted || !r.length) return;
-        show(r);
-        setBusy(false);
-        setRefining(true);
-      };
-      (styles.some(Boolean) ? planSections(points, styles, options, ctrl.signal) : planRoute(points, options, ctrl.signal, [], first))
+      (styles.some(Boolean) ? planSections(points, styles, options, ctrl.signal) : planRoute(points, options, ctrl.signal))
         .then((r) => {
           // A generated loop point the route has to ride up a dead end to
           // reach: move it to the foot of that road and plan again. Moved
@@ -432,11 +421,7 @@ export default function App() {
         .catch((e: Error) => {
           if (e.name !== "AbortError") setError(e.message);
         })
-        .finally(() => {
-          if (ctrl.signal.aborted || replanning) return;
-          setBusy(false);
-          setRefining(false);
-        });
+        .finally(() => !ctrl.signal.aborted && !replanning && setBusy(false));
     }, 350);
     return () => {
       clearTimeout(t);
@@ -673,11 +658,6 @@ export default function App() {
 
   /** Ride mode for real: record the ride too, unless already recording. */
   function startRide() {
-    // Ride the route on screen: a better one arriving mid-ride would jump.
-    if (refining) {
-      planCtrl.current?.abort();
-      setRefining(false);
-    }
     if (!recording.state) {
       recording.start(name.trim() || routeTitle());
       autoRecord.current = true;
@@ -874,10 +854,7 @@ export default function App() {
         )}
         {(route || busy) && (
           <section className="summary" aria-live="polite" data-peek>
-            {(busy || refining) && <div className="progress" />}
-            {refining && route && (
-              <p className="refining">{options.style === "twisty" ? "Looking for twistier roads…" : "Tidying up the loop…"}</p>
-            )}
+            {busy && <div className="progress" />}
             {route ? (
               <>
                 <div className="summary-top">
