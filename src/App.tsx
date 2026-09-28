@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Map as MapLibre } from "maplibre-gl";
 import MapView from "./components/MapView";
 import BottomSheet, { type Snap } from "./components/BottomSheet";
@@ -10,6 +10,9 @@ import SettingsScreen from "./components/SettingsScreen";
 import StopList from "./components/StopList";
 import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
 import StopCard from "./components/StopCard";
+import RidesPage from "./components/RidesPage";
+import ProfilePage from "./components/ProfilePage";
+import { applyTankRange, loadGarage, loadProfile, storeGarage, storeProfile, type Garage } from "./lib/garage";
 import { applySettings, loadSettings, storeSettings, type Settings } from "./lib/settings";
 import { clearRecentSearches } from "./lib/places";
 import { loadFuelPrices, priceNear, type FuelPrice, type Snapshot } from "./lib/fuelPrices";
@@ -116,6 +119,12 @@ export default function App() {
   const [routes, setRoutes] = useState<RouteResult[]>([]);
   const [selected, setSelected] = useState(0);
   const [busy, setBusy] = useState(false);
+  /** Which page the bottom bar shows: the map and planner, rides, or the rider's profile. */
+  const [page, setPage] = useState<"rides" | "map" | "profile">("map");
+  const [rider, setRider] = useState(loadProfile);
+  const [garage, setGarageState] = useState<Garage>(loadGarage);
+  const navRef = useRef<HTMLElement>(null);
+  const [navH, setNavH] = useState(0);
   /** Pins being moved onto the nearest road; planning waits for them. */
   const [snapping, setSnapping] = useState(0);
   const [error, setError] = useState("");
@@ -177,6 +186,23 @@ export default function App() {
   const [daylight, setDaylight] = useState(true);
   const mapRef = useRef<MapLibre | null>(null);
   const [riding, setRiding] = useState<{ simulate: boolean } | null>(null);
+  // The panel sits above the bottom bar: measure the bar (it grows with the phone's gesture area).
+  useLayoutEffect(() => {
+    const el = navRef.current;
+    if (!el) {
+      setNavH(0);
+      return;
+    }
+    const measure = () => setNavH(window.matchMedia("(max-width: 760px)").matches ? Math.round(el.getBoundingClientRect().height) : 0);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [riding]);
   const [rideLayer, setRideLayer] = useState<RideLayer | null>(null);
   const [followBreaks, setFollowBreaks] = useState(0);
   const wantFit = useRef(!!shared);
@@ -654,6 +680,7 @@ export default function App() {
   }
 
   const isGeneratedLoop = options.returnToStart && stops.some((s) => s.auto || s.shape?.length || s.id === placeStopId);
+  // Dirt roads are avoided unless turned off, so only the rider's own choices count.
   const avoidCount = [options.avoidHighways && options.style === "fastest", options.avoidTolls, options.avoidFerries].filter(Boolean).length;
 
   /** Open (or close) a summary menu, with room below it in the planner. */
@@ -698,6 +725,26 @@ export default function App() {
     }
     // Home always goes on the end: it's where the ride finishes.
     addStop(home.position, home.label, stops.length);
+  }
+
+  /** The map page with the planner on one of its tabs. */
+  function showOnMap(t: "plan" | "saved" | "rides", at: Snap = "full") {
+    setTab(t);
+    setSnap(at);
+    setPage("map");
+  }
+
+  /** The garage changed: the vehicle being ridden sets the vehicle type, tank range and fuel. */
+  function changeGarage(g: Garage) {
+    const before = garage.active;
+    setGarageState(g);
+    storeGarage(g);
+    const v = g.vehicles.find((x) => x.id === g.active);
+    if (!v) return;
+    setOpt("vehicle", v.kind);
+    applyTankRange(v);
+    if (settings.fuelType !== v.fuel) changeSettings({ ...settings, fuelType: v.fuel });
+    if (v.id !== before) flash(`Riding: ${v.name}`);
   }
 
   function openLoopScreen() {
@@ -941,7 +988,7 @@ export default function App() {
           }}
         />
       ) : (
-      <BottomSheet snap={snap} onSnap={setSnap} onCover={setCover}>
+      <BottomSheet snap={snap} onSnap={setSnap} onCover={setCover} bottom={navH}>
         {recording.unfinished && !recording.state && (
           <section className="notice" role="status" data-peek>
             <p>
@@ -1028,6 +1075,10 @@ export default function App() {
                           <input type="checkbox" checked={options.avoidFerries} onChange={(e) => setOpt("avoidFerries", e.target.checked)} />
                           Ferries
                         </label>
+                        <label>
+                          <input id="avoid-dirt" type="checkbox" checked={options.avoidUnpaved !== false} onChange={(e) => setOpt("avoidUnpaved", e.target.checked)} />
+                          Dirt roads
+                        </label>
                       </div>
                     )}
                   </div>
@@ -1074,9 +1125,6 @@ export default function App() {
             ◆
           </span>
           <h1>Forge</h1>
-          <button className="settings-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
-            <Icon name="settings" size={22} />
-          </button>
           <nav className="tabs" role="tablist">
             <button role="tab" aria-selected={tab === "plan"} onClick={() => setTab("plan")}>
               Plan
@@ -1235,6 +1283,10 @@ export default function App() {
                 <label>
                   <input type="checkbox" checked={options.avoidFerries} onChange={(e) => setOpt("avoidFerries", e.target.checked)} />
                   Avoid ferries
+                </label>
+                <label>
+                  <input type="checkbox" checked={options.avoidUnpaved !== false} onChange={(e) => setOpt("avoidUnpaved", e.target.checked)} />
+                  Avoid dirt roads
                 </label>
               </div>
             </section>
@@ -1413,31 +1465,6 @@ export default function App() {
                 <button onClick={() => backupInput.current?.click()}>Restore a backup</button>
               </div>
               <p className="hint">A backup file moves your saved routes and rides between the website and the app, or to a new phone.</p>
-              <input
-                ref={backupInput}
-                type="file"
-                accept=".json,application/json"
-                hidden
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void restore(f);
-                  e.target.value = "";
-                }}
-              />
-              <input
-                ref={fileInput}
-                type="file"
-                accept=".gpx,application/gpx+xml"
-                hidden
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) {
-                    importGpx(f);
-                    setTab("plan");
-                  }
-                  e.target.value = "";
-                }}
-              />
             </section>
             {saved.length === 0 ? (
               <p className="empty">No saved routes yet. Plan one and press Save.</p>
@@ -1814,6 +1841,101 @@ export default function App() {
         )}
         {toast && <div className="toast">{toast}</div>}
       </main>
+      {!riding && page === "rides" && (
+        <RidesPage
+          saved={saved}
+          rides={rides}
+          onPlanned={() => showOnMap("saved")}
+          onCompleted={() => showOnMap("rides")}
+          onOpenSaved={(r) => {
+            openSaved(r);
+            setPage("map");
+          }}
+          onOpenRide={(r) => {
+            setSelectedRide(r);
+            showOnMap("rides", "half");
+            setFitKey((k) => k + 1);
+          }}
+          onRoundTrip={() => {
+            setPage("map");
+            openLoopScreen();
+          }}
+          onPlan={() => {
+            showOnMap("plan", "full");
+            requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".plan-search input, input[type=search]")?.focus());
+          }}
+        />
+      )}
+      {!riding && page === "profile" && (
+        <ProfilePage
+          profile={rider}
+          onProfile={(p) => {
+            setRider(p);
+            storeProfile(p);
+          }}
+          garage={garage}
+          onGarage={changeGarage}
+          home={home}
+          onHome={setHome}
+          onHomeHere={() =>
+            navigator.geolocation?.getCurrentPosition(
+              (pos) => setHome({ label: "Home", position: { lat: pos.coords.latitude, lng: pos.coords.longitude } }),
+              () => flash("Couldn't get your location"),
+              { enableHighAccuracy: true, timeout: 10000 },
+            )
+          }
+          near={center}
+          fuelDefault={settings.fuelType}
+          onSettings={() => setSettingsOpen(true)}
+          onBackUp={backUp}
+          onRestore={() => backupInput.current?.click()}
+          onImportGpx={() => fileInput.current?.click()}
+        />
+      )}
+      {!riding && (
+        <nav className="bottom-nav" ref={navRef} aria-label="Pages">
+          {(
+            [
+              ["rides", "Rides", "list"],
+              ["map", "Map", "map"],
+              ["profile", "Profile", "user"],
+            ] as const
+          ).map(([id, label, icon]) => (
+            <button key={id} aria-current={page === id ? "page" : undefined} onClick={() => setPage(id)}>
+              <span className="nav-pill">
+                <Icon name={icon} size={24} />
+              </span>
+              {label}
+            </button>
+          ))}
+        </nav>
+      )}
+      <input
+        ref={backupInput}
+        type="file"
+        accept=".json,application/json"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void restore(f);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".gpx,application/gpx+xml"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) {
+            importGpx(f);
+            setTab("plan");
+            setPage("map");
+          }
+          e.target.value = "";
+        }}
+      />
     </div>
   );
 }

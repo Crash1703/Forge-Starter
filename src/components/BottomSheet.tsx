@@ -7,6 +7,8 @@ interface Props {
   onSnap: (s: Snap) => void;
   /** Reports how many pixels of the screen the panel covers, so the map can keep clear of it. */
   onCover: (px: number) => void;
+  /** Height of the bar below the panel (the page tabs), in px. */
+  bottom?: number;
   children: ReactNode;
 }
 
@@ -43,7 +45,7 @@ function useViewportHeight() {
  * The peek fits whatever inside is marked `data-peek` (the route summary, or
  * the search box before there's a route), however big the phone's text is.
  */
-export default function BottomSheet({ snap, onSnap, onCover, children }: Props) {
+export default function BottomSheet({ snap, onSnap, onCover, bottom = 0, children }: Props) {
   const phone = useIsPhone();
   const vh = useViewportHeight();
   const sheet = useRef<HTMLElement>(null);
@@ -51,7 +53,7 @@ export default function BottomSheet({ snap, onSnap, onCover, children }: Props) 
   const heights: Record<Snap, number> = {
     peek,
     half: Math.max(peek, Math.round(vh * 0.5)),
-    full: vh - 64,
+    full: vh - 64 - bottom,
   };
   const [drag, setDrag] = useState<number | null>(null); // px dragged up (+) or down (-)
   const start = useRef<{ y: number; t: number; moved: boolean } | null>(null);
@@ -78,9 +80,9 @@ export default function BottomSheet({ snap, onSnap, onCover, children }: Props) 
   });
 
   useEffect(() => {
-    onCover(phone ? heights[snap] : 0);
+    onCover(phone ? heights[snap] + bottom : 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phone, snap, vh, peek]);
+  }, [phone, snap, vh, peek, bottom]);
 
   if (!phone) return <aside className="panel">{children}</aside>;
 
@@ -116,9 +118,9 @@ export default function BottomSheet({ snap, onSnap, onCover, children }: Props) 
   return (
     <aside
       ref={sheet}
-      className={`panel sheet${drag != null ? " dragging" : ""}`}
+      className={`panel sheet${drag != null ? " dragging" : ""}${bottom ? " above-bar" : ""}`}
       // Sized to what's visible (not slid off-screen), so everything inside can be scrolled into view at any height.
-      style={{ height: visible }}
+      style={{ height: visible, bottom }}
       aria-label="Route planner"
     >
       <div
