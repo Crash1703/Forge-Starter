@@ -8,7 +8,7 @@ import type { RouteResult } from "../lib/routes";
 import type { Stop } from "../lib/storage";
 import type { Poi } from "../lib/pois";
 import { SIGHT_ICONS, type Sight } from "../lib/sights";
-import { MAP_STYLE, MAP_STYLE_DARK } from "../lib/config";
+import { MAP_STYLE, MAP_STYLE_DARK, MAP_STYLE_TOPO } from "../lib/config";
 
 // MapLibre looks for its worker next to its own script, which bundling moves;
 // let Vite bundle the worker (with its shared chunk) and point MapLibre at it.
@@ -32,7 +32,8 @@ interface Props {
   hover: LatLng | null;
   /** Changing this re-fits the view to the current route or stops. */
   fitKey: number;
-  theme: "light" | "dark";
+  /** Day, night or terrain map. */
+  theme: "light" | "dark" | "topo";
   /** Pixels of map hidden under the planner panel at the bottom (phones). */
   insetBottom: number;
   /** Pixels hidden under a top banner (Ride mode). */
@@ -64,6 +65,8 @@ const ALT = "#8a94a6";
 const RIDE_PURPLE = "#7b61ff";
 /** Route colour by twistiness: easy, curvy, twisty, very twisty. */
 export const TWIST_COLOURS = ["#f5a25d", "#ff6a13", "#e8363d", "#b0126b"];
+
+const styleFor = (theme: Props["theme"]) => (theme === "dark" ? MAP_STYLE_DARK : theme === "topo" ? MAP_STYLE_TOPO : MAP_STYLE);
 
 type Geo = FeatureCollection;
 const EMPTY: Geo = { type: "FeatureCollection", features: [] };
@@ -126,7 +129,7 @@ export default function MapView(props: Props) {
     if (!el.current) return;
     const m = new MapLibre({
       container: el.current,
-      style: props.theme === "dark" ? MAP_STYLE_DARK : MAP_STYLE,
+      style: styleFor(props.theme),
       center: [153.0, -27.0],
       zoom: 7,
       attributionControl: { compact: true },
@@ -209,7 +212,7 @@ export default function MapView(props: Props) {
       firstTheme.current = false;
       return;
     }
-    map.current?.setStyle(props.theme === "dark" ? MAP_STYLE_DARK : MAP_STYLE);
+    map.current?.setStyle(styleFor(props.theme));
   }, [props.theme]);
 
   // The last zoom-to-fit, so a padding change straight after can redo it.

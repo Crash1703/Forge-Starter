@@ -57,14 +57,19 @@ const STYLES: { id: RouteStyle; name: string; hint: string }[] = [
 /** Short commit ID of this build, shown in the footer so riders can tell whether a refresh picked up an update. */
 const BUILD = (import.meta.env.VITE_BUILD_ID as string | undefined)?.slice(0, 7) || "dev";
 
-/** Compass rose for round trips: 8 directions around "any direction". */
+type MapTheme = "auto" | "light" | "dark" | "topo";
 
-type MapTheme = "auto" | "light" | "dark";
+const MAP_LAYERS: { id: MapTheme; name: string; hint: string; icon: string }[] = [
+  { id: "auto", name: "Automatic", hint: "Day map, dark after sunset", icon: "◐" },
+  { id: "light", name: "Day", hint: "Road map", icon: "☀" },
+  { id: "dark", name: "Night", hint: "Dark road map", icon: "☾" },
+  { id: "topo", name: "Terrain", hint: "Hills, contours and tracks", icon: "⛰" },
+];
 const THEME_KEY = "forge.mapTheme";
 const loadTheme = (): MapTheme => {
   try {
     const t = localStorage.getItem(THEME_KEY);
-    return t === "light" || t === "dark" ? t : "auto";
+    return t === "light" || t === "dark" || t === "topo" ? t : "auto";
   } catch {
     return "auto";
   }
@@ -109,6 +114,8 @@ export default function App() {
   const [loopStart, setLoopStart] = useState<LoopStart>("here");
   const [locating, setLocating] = useState(false);
   const [sightsOn, setSightsOn] = useState(false);
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [menu, setMenu] = useState<"avoid" | "more" | null>(null);
   const [sights, setSights] = useState<Sight[]>([]);
   const [sightsNote, setSightsNote] = useState("");
   const [sight, setSight] = useState<Sight | null>(null);
@@ -211,15 +218,15 @@ export default function App() {
   }, [me, center, stops]);
   const theme = themePref === "auto" ? (daylight ? "light" : "dark") : themePref;
 
-  function cycleTheme() {
-    const next: MapTheme = themePref === "auto" ? "light" : themePref === "light" ? "dark" : "auto";
+  function pickLayer(next: MapTheme) {
+    setLayersOpen(false);
     setThemePref(next);
     try {
       localStorage.setItem(THEME_KEY, next);
     } catch {
       /* remembered for this visit only */
     }
-    flash(next === "auto" ? "Map: automatic (dark after sunset)" : next === "light" ? "Map: day" : "Map: night");
+    flash(`Map: ${MAP_LAYERS.find((l) => l.id === next)?.name.toLowerCase()}`);
   }
 
   function centreOnMe() {
@@ -453,6 +460,31 @@ export default function App() {
     via.filter((v) => v.auto).forEach((v) => labelStop(v.id, v.position));
     loopFit.current = loopMode === "time" && km === undefined ? { targetSec: loopMin * 60, km: length } : null;
     wantFit.current = true;
+  }
+
+  const isGeneratedLoop = options.returnToStart && stops.some((s) => s.auto || s.shape?.length);
+  const avoidCount = [options.avoidHighways && options.style === "fastest", options.avoidTolls, options.avoidFerries].filter(Boolean).length;
+
+  /** Open (or close) a summary menu, with room below it in the planner. */
+  function openMenu(which: "avoid" | "more") {
+    setMenu((m) => (m === which ? null : which));
+    setSnap((s) => (s === "peek" ? "half" : s));
+  }
+
+  // A tap anywhere outside an open menu closes it.
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: PointerEvent) => !(e.target as Element).closest?.(".menu-wrap") && setMenu(null);
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [menu]);
+
+  /** "Customise": open the planner on the stop list. */
+  function customise() {
+    setMenu(null);
+    setTab("plan");
+    setSnap("full");
+    requestAnimationFrame(() => document.querySelector(".stops")?.scrollIntoView({ block: "start", behavior: "smooth" }));
   }
 
   function openLoopScreen() {
@@ -698,34 +730,104 @@ export default function App() {
             {busy && <div className="progress" />}
             {route ? (
               <>
-                <TwistGauge curviness={route.curviness} />
-                <div className="summary-text">
-                  <strong>
-                    <span className="nowrap">{formatDistance(route.distance)}</span> ·{" "}
-                    <span className="nowrap">{formatDuration(route.duration)}</span>
-                  </strong>
-                  <span>
-                    {[
-                      `${bends} ${bends === 1 ? "bend" : "bends"}`,
-                      profile ? `${Math.round(profile.ascent)} m climb` : null,
-                      options.returnToStart ? "loop" : null,
-                    ]
-                      .filter(Boolean)
-                      .map((part, i) => (
-                        // Each phrase stays whole; lines break between them.
-                        <span key={i}>
-                          {i > 0 && " · "}
-                          <span className="nowrap">{part}</span>
-                        </span>
-                      ))}
-                  </span>
+                <div className="summary-top">
+                  <TwistGauge curviness={route.curviness} />
+                  <dl className="summary-stats">
+                    <div>
+                      <dt>Distance</dt>
+                      <dd>
+                        {formatDistance(route.distance)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Time</dt>
+                      <dd>
+                        {formatDuration(route.duration)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Bends</dt>
+                      <dd>
+                        {bends}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+                <p className="summary-meta">
+                  {[profile ? `${Math.round(profile.ascent)} m climb` : null, options.returnToStart ? "loop" : null]
+                    .filter(Boolean)
+                    .map((part, i) => (
+                      <span key={i} className="nowrap">
+                        {part} ·{" "}
+                      </span>
+                    ))}
                   <button className="link preview" onClick={() => setRiding({ simulate: true })} disabled={busy}>
                     ▷ Preview ride
                   </button>
+                </p>
+                <div className="summary-tools">
+                  <button onClick={customise}>✎ Customise</button>
+                  {isGeneratedLoop && (
+                    <button onClick={() => makeLoop()} title="Same settings, a different loop">
+                      ⟳ Recalculate
+                    </button>
+                  )}
+                  <div className="menu-wrap">
+                    <button aria-expanded={menu === "avoid"} aria-haspopup="true" onClick={() => openMenu("avoid")}>
+                      Avoid{avoidCount ? ` (${avoidCount})` : ""} ▾
+                    </button>
+                    {menu === "avoid" && (
+                      <div className="menu" role="group" aria-label="Avoid">
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={options.avoidHighways || options.style !== "fastest"}
+                            disabled={options.style !== "fastest"}
+                            onChange={(e) => setOpt("avoidHighways", e.target.checked)}
+                          />
+                          Motorways
+                        </label>
+                        <label>
+                          <input type="checkbox" checked={options.avoidTolls} onChange={(e) => setOpt("avoidTolls", e.target.checked)} />
+                          Tolls
+                        </label>
+                        <label>
+                          <input type="checkbox" checked={options.avoidFerries} onChange={(e) => setOpt("avoidFerries", e.target.checked)} />
+                          Ferries
+                        </label>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <button className="ride-go primary" onClick={startRide} disabled={busy}>
-                  Ride
-                </button>
+                <div className="summary-actions">
+                  <button className="ride-go primary" onClick={startRide} disabled={busy}>
+                    ▲ Ride
+                  </button>
+                  <button onClick={saveRoute} disabled={busy}>
+                    Save
+                  </button>
+                  <div className="menu-wrap">
+                    <button className="more" aria-label="More" aria-expanded={menu === "more"} aria-haspopup="true" onClick={() => openMenu("more")}>
+                      ⋯
+                    </button>
+                    {menu === "more" && (
+                      <div className="menu" role="menu">
+                        <button role="menuitem" onClick={() => (setMenu(null), void share())}>
+                          ↗ Share
+                        </button>
+                        <button role="menuitem" onClick={() => (setMenu(null), exportGpx())}>
+                          ⤓ Export GPX
+                        </button>
+                        <button role="menuitem" onClick={() => (setMenu(null), setRiding({ simulate: true }))}>
+                          ▷ Preview ride
+                        </button>
+                        <button role="menuitem" onClick={() => (setMenu(null), setSnap("full"), setTab("plan"))}>
+                          ☰ Route details
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </>
             ) : (
               <div className="summary-text">
@@ -917,7 +1019,7 @@ export default function App() {
                 <button className="primary" onClick={openLoopScreen}>
                   ↻ Plan a round trip
                 </button>
-                {options.returnToStart && stops.some((s) => s.auto || s.shape?.length) && (
+                {isGeneratedLoop && (
                   <button onClick={() => makeLoop()} title="Same settings, a different loop">
                     ⟳ Recalculate
                   </button>
@@ -1155,6 +1257,24 @@ export default function App() {
             {sightsOn && sightsNote && <span className="chip-note">{sightsNote}</span>}
           </div>
         )}
+        {!riding && layersOpen && (
+          <>
+            <div className="backdrop" onClick={() => setLayersOpen(false)} />
+            <div className="layers-menu" role="radiogroup" aria-label="Map">
+              {MAP_LAYERS.map((l) => (
+                <button key={l.id} role="radio" aria-checked={themePref === l.id} onClick={() => pickLayer(l.id)}>
+                  <span className="layer-icon" aria-hidden>
+                    {l.icon}
+                  </span>
+                  <span>
+                    <strong>{l.name}</strong>
+                    <small>{l.hint}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         {!riding && sight && (
           <div className="sight-card" role="dialog" aria-label={sight.name}>
             {sight.photo && <img src={sight.photo.replace(/width=\d+/, "width=480")} alt="" />}
@@ -1196,9 +1316,19 @@ export default function App() {
         )}
         {!riding && (
         <div className="fabs">
-          <button className="fab" onClick={cycleTheme} aria-label={`Map style: ${themePref}. Change`} title="Day, night or automatic map">
-            <span aria-hidden>{themePref === "auto" ? "◐" : themePref === "light" ? "☀" : "☾"}</span>
-            <small>{themePref === "auto" ? "Auto" : themePref === "light" ? "Day" : "Night"}</small>
+          <button
+            className="fab"
+            onClick={() => {
+              setLayersOpen((o) => !o);
+              // Make room on the map for the menu.
+              setSnap("peek");
+            }}
+            aria-label="Map layers"
+            aria-expanded={layersOpen}
+            title="Map layers"
+          >
+            <span aria-hidden>◇</span>
+            <small>{MAP_LAYERS.find((l) => l.id === themePref)?.name.replace("Automatic", "Auto")}</small>
           </button>
           <button
             className={`fab rec${recording.state ? " on" : ""}`}
