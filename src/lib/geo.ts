@@ -523,6 +523,12 @@ export function sharedRoad(path: LatLng[], others: LatLng[][], ends: LatLng[], k
   return shared;
 }
 
+/** The average of some points: the middle of a loop, near enough. */
+export function centroid(points: LatLng[]): LatLng {
+  const n = Math.max(1, points.length);
+  return { lat: points.reduce((a, p) => a + p.lat, 0) / n, lng: points.reduce((a, p) => a + p.lng, 0) / n };
+}
+
 /**
  * Up to `max` points spread evenly along `paths`, skipping anything within
  * `keepOut` metres of the `ends`: roads for the router to stay off.

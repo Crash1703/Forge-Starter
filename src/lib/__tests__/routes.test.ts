@@ -467,6 +467,68 @@ describe("loops don't cross themselves", () => {
   });
 });
 
+describe("twisty loops stay loops", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const home = { lat: -26.8, lng: 153.13 };
+  const place = destination(home, 250, 27000);
+  const out = destination(destination(home, 250, 13500), 340, 4000);
+  const back = destination(destination(home, 250, 13500), 160, 4000);
+  const straight = (locs: { lat: number; lon: number; type?: string }[]) => {
+    const pts = locs.map((l) => [l.lat, l.lon] as [number, number]);
+    const legs: { shape: string; summary: { length: number; time: number } }[] = [];
+    let cur = [pts[0]];
+    locs.slice(1).forEach((l, i) => {
+      cur.push(pts[i + 1]);
+      if (l.type !== "through") {
+        legs.push({ shape: encode6(cur), summary: { length: 20, time: 1200 } });
+        cur = [pts[i + 1]];
+      }
+    });
+    return { summary: { length: 20 * legs.length, time: 1200 * legs.length }, legs };
+  };
+
+  it("only tries detours on the outside of the loop", async () => {
+    const helpers: { lat: number; lng: number }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        for (const l of body.locations) if (l.radius === 1500) helpers.push({ lat: l.lat, lng: l.lon });
+        return new Response(JSON.stringify({ trip: straight(body.locations) }));
+      }),
+    );
+    const pts = [{ pos: home }, { pos: out, via: true }, { pos: place }, { pos: back, via: true }, { pos: home }];
+    await planRoute(pts, { ...defaultOptions, style: "twisty", returnToStart: true });
+    const middle = { lat: (home.lat * 2 + out.lat + place.lat + back.lat) / 5, lng: (home.lng * 2 + out.lng + place.lng + back.lng) / 5 };
+    expect(helpers.length).toBeGreaterThan(0);
+    expect(helpers.length).toBeLessThan(4);
+    // Every detour lies further from the loop's middle than the way it bends.
+    for (const h of helpers) expect(distance(h, middle)).toBeGreaterThan(5000);
+  });
+
+  it("with a style per stop, keeps each section off the ones before it", async () => {
+    const A = { lat: -26.8, lng: 153.0 };
+    const at = (e: number, n: number) => destination(destination(A, 90, e * 1000), 0, n * 1000);
+    const P = at(10, 10);
+    const outLeg = { shape: encode6([A, at(10, 0), P].map((p) => [p.lat, p.lng])), summary: { length: 20, time: 1200 } };
+    const across = { shape: encode6([P, at(5, -3), A].map((p) => [p.lat, p.lng])), summary: { length: 22, time: 1300 } };
+    const around = { shape: encode6([P, at(0, 10), A].map((p) => [p.lat, p.lng])), summary: { length: 21, time: 1260 } };
+    const trip = (l: typeof outLeg) => ({ summary: l.summary, legs: [l] });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        const homeward = Math.abs(body.locations[0].lat - P.lat) < 1e-6;
+        if (!homeward) return new Response(JSON.stringify({ trip: trip(outLeg) }));
+        // The twistiest way home crosses the way out; another doesn't.
+        return new Response(JSON.stringify({ trip: trip(across), alternates: body.alternates ? [{ trip: trip(around) }] : [] }));
+      }),
+    );
+    const [r] = await planSections([{ pos: A }, { pos: P }, { pos: A }], ["scenic", "twisty"], { ...defaultOptions, returnToStart: true });
+    expect(r.distance).toBe(41000);
+  });
+});
+
 describe("adding a stop while riding", () => {
   afterEach(() => vi.unstubAllGlobals());
   const from = { lat: -26.7, lng: 152.9 };
