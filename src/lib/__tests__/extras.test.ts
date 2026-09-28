@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { destination, type LatLng } from "../geo";
 import { rainAhead, weatherAlong, weatherIcon, weatherPlaces } from "../weather";
-import { fuelGaps, placeAlong, type Poi } from "../pois";
+import { fuelGaps, placeAlong, poiQuery, POI_KINDS, type Poi } from "../pois";
 
 const start = { lat: -26.7, lng: 152.9 };
 const road = (km: number): LatLng[] => Array.from({ length: km + 1 }, (_, i) => destination(start, 90, i * 1000));
@@ -56,15 +56,22 @@ describe("fuel and cafés", () => {
   };
 
   it("places stops along the route in riding order, with sensible names", () => {
-    const pois = placeAlong(
-      [el(1, 120, { amenity: "fuel", brand: "Ampol" }), el(2, 30, { amenity: "cafe", name: "Maple 3 Café" }), el(3, 60, { shop: "bakery" }), el(1, 120, { amenity: "fuel" })],
-      line,
-    );
-    expect(pois.map((p) => [p.kind, p.name, Math.round(p.at / 1000)])).toEqual([
+    const cafes = placeAlong([el(3, 60, { shop: "bakery" }), el(2, 30, { amenity: "cafe", name: "Maple 3 Café" })], line, "cafe");
+    expect(cafes.map((p) => [p.kind, p.name, Math.round(p.at / 1000)])).toEqual([
       ["cafe", "Maple 3 Café", 30],
       ["cafe", "Bakery", 60],
-      ["fuel", "Ampol", 120],
     ]);
+    const fuel = placeAlong([el(1, 120, { amenity: "fuel", brand: "Ampol" }), el(1, 120, { amenity: "fuel" }), el(4, 10, { amenity: "fuel" })], line, "fuel");
+    expect(fuel.map((p) => p.name)).toEqual(["Fuel", "Ampol"]);
+    expect(placeAlong([el(5, 5, { amenity: "pub" })], line, "pub")[0].name).toBe("Pub");
+  });
+
+  it("asks for one kind at a time, the planner's short distance from the road", () => {
+    const q = poiQuery("pub", line.slice(0, 3));
+    expect(q).toContain('nwr["amenity"~"^(pub|bar|biergarten)$"](around:200,');
+    expect(q).not.toContain("fuel");
+    expect(poiQuery("toilets", line.slice(0, 3))).toContain('nwr["amenity"="toilets"](around:300,');
+    expect(POI_KINDS.map((k) => k.name)).toEqual(["Fuel", "Cafés", "Food", "Pubs", "Toilets", "Lookouts"]);
   });
 
   it("finds stretches longer than your tank range with no fuel", () => {

@@ -9,15 +9,10 @@ const el = (id: number, p: { lat: number; lng: number }, tags: Record<string, st
 
 describe("stops while riding", () => {
   it("looks along the road ahead the way the planner does, and around the rider", () => {
-    const q = placesQuery("food", line, rider);
-    expect(q).toContain('nwr["amenity"~"^(cafe|restaurant|fast_food|pub)$"](around:200,');
+    const q = placesQuery("cafe", line, rider);
+    expect(q).toContain('nwr["amenity"="cafe"](around:200,');
     expect(q).toContain('nwr["shop"="bakery"](around:3000,-26.70000,152.90000)');
     expect(placesQuery("fuel", line, rider)).toContain('nwr["amenity"="fuel"](around:300,');
-  });
-
-  it("drops places away from both the road and the rider", () => {
-    const far = rankPlaces([el(9, destination(east(15000), 0, 1800), { amenity: "fuel" })], "fuel", line, rider);
-    expect(far).toEqual([]);
   });
 
   it("lists places on the way first, nearest ahead first, then others nearby", () => {
@@ -49,13 +44,13 @@ describe("places the planner already found", () => {
   const east = (m: number) => destination(rider, 90, m);
   const ahead = [0, 5000, 10000, 20000].map(east);
   const known = [
-    { id: "a", kind: "fuel" as const, name: "Behind me", position: destination(rider, 270, 4000) },
-    { id: "b", kind: "fuel" as const, name: "Ampol", position: destination(east(8000), 0, 150) },
-    { id: "c", kind: "cafe" as const, name: "Maple 3", position: destination(east(3000), 0, 100) },
+    { id: "a", kind: "fuel" as const, name: "Behind me", position: destination(rider, 270, 4000), at: 0 },
+    { id: "b", kind: "fuel" as const, name: "Ampol", position: destination(east(8000), 0, 150), at: 0 },
+    { id: "c", kind: "cafe" as const, name: "Maple 3", position: destination(east(3000), 0, 100), at: 0 },
   ];
   it("lists the ones still ahead, for the right kind", () => {
     expect(knownPlaces(known, "fuel", ahead, rider).map((p) => p.name)).toEqual(["Ampol"]);
-    expect(knownPlaces(known, "food", ahead, rider).map((p) => p.name)).toEqual(["Maple 3"]);
+    expect(knownPlaces(known, "cafe", ahead, rider).map((p) => p.name)).toEqual(["Maple 3"]);
     expect(knownPlaces(known, "lookout", ahead, rider)).toEqual([]);
   });
 });

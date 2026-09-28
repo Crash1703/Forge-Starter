@@ -1,9 +1,21 @@
 import { distance, pathLength, resample, type LatLng } from "./geo";
 import { overpass, type OverpassElement } from "./overpass";
 
-export type PoiKind = "fuel" | "cafe";
+export type PoiKind = "fuel" | "cafe" | "food" | "pub" | "toilets" | "lookout";
 
-/** A fuel station or café near the route. */
+/** What can be looked up along a route, and how far off the road each may be. */
+export const POI_KINDS: { kind: PoiKind; name: string; one: string; filters: string[]; near: number }[] = [
+  { kind: "fuel", name: "Fuel", one: "Fuel", filters: ['["amenity"="fuel"]'], near: 300 },
+  { kind: "cafe", name: "Cafés", one: "Café", filters: ['["amenity"="cafe"]', '["shop"="bakery"]'], near: 200 },
+  { kind: "food", name: "Food", one: "Food", filters: ['["amenity"~"^(restaurant|fast_food)$"]'], near: 200 },
+  { kind: "pub", name: "Pubs", one: "Pub", filters: ['["amenity"~"^(pub|bar|biergarten)$"]'], near: 200 },
+  { kind: "toilets", name: "Toilets", one: "Toilets", filters: ['["amenity"="toilets"]'], near: 300 },
+  { kind: "lookout", name: "Lookouts", one: "Lookout", filters: ['["tourism"="viewpoint"]'], near: 500 },
+];
+
+export const poiKind = (kind: PoiKind) => POI_KINDS.find((k) => k.kind === kind)!;
+
+/** A place near the route: fuel, a café, a pub, toilets, a lookout. */
 export interface Poi {
   id: string;
   kind: PoiKind;
@@ -12,26 +24,33 @@ export interface Poi {
   at: number; // metres along the route
 }
 
+/** The route as the lookup sends it: ~200 points, which the public servers answer quickly. */
+export function lookupLine(path: LatLng[]): LatLng[] {
+  return resample(path, Math.max(400, pathLength(path) / 200));
+}
+
+/** One kind of place near a line, plus (optionally) around a point. */
+export function poiQuery(kind: PoiKind, line: LatLng[], around?: { at: LatLng; radius: number }): string {
+  const k = poiKind(kind);
+  const coords = line.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join(",");
+  const parts = k.filters.flatMap((f) => [
+    ...(line.length > 1 ? [`nwr${f}(around:${k.near},${coords});`] : []),
+    ...(around ? [`nwr${f}(around:${around.radius},${around.at.lat.toFixed(5)},${around.at.lng.toFixed(5)});`] : []),
+  ]);
+  return `[out:json][timeout:25];(${parts.join("")});out center tags;`;
+}
 
 /**
- * Fuel stations (within 300 m) and cafés and bakeries (within 200 m) along a
- * route, from OpenStreetMap via Overpass, in riding order.
+ * Places of one kind along a route, from OpenStreetMap via Overpass, in
+ * riding order. One kind at a time keeps each question small and quick.
  */
-export async function poisAlong(path: LatLng[], signal?: AbortSignal): Promise<Poi[]> {
-  const total = pathLength(path);
-  // Overpass takes the route as a polyline; ~200 points keeps the query small.
-  const line = resample(path, Math.max(400, total / 200));
-  const coords = line.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join(",");
-  const query = `[out:json][timeout:25];(
-nwr["amenity"="fuel"](around:300,${coords});
-nwr["amenity"="cafe"](around:200,${coords});
-nwr["shop"="bakery"](around:200,${coords});
-);out center tags;`;
-  return placeAlong(await overpass(query, signal), line);
+export async function poisAlong(path: LatLng[], kind: PoiKind, signal?: AbortSignal): Promise<Poi[]> {
+  const line = lookupLine(path);
+  return placeAlong(await overpass(poiQuery(kind, line), signal), line, kind);
 }
 
 /** Turn Overpass elements into stops, each placed at its distance along the route. */
-export function placeAlong(elements: OverpassElement[], line: LatLng[]): Poi[] {
+export function placeAlong(elements: OverpassElement[], line: LatLng[], kind: PoiKind): Poi[] {
   const cum = [0];
   for (let i = 1; i < line.length; i++) cum.push(cum[i - 1] + distance(line[i - 1], line[i]));
   const seen = new Set<string>();
@@ -47,8 +66,7 @@ export function placeAlong(elements: OverpassElement[], line: LatLng[]): Poi[] {
     let best = 0;
     for (let i = 1; i < line.length; i++) if (distance(line[i], position) < distance(line[best], position)) best = i;
     const tags = e.tags ?? {};
-    const kind: PoiKind = tags.amenity === "fuel" ? "fuel" : "cafe";
-    const name = tags.name || tags.brand || (kind === "fuel" ? "Fuel" : tags.shop === "bakery" ? "Bakery" : "Café");
+    const name = tags.name || tags.brand || tags.operator || (tags.shop === "bakery" ? "Bakery" : poiKind(kind).one);
     out.push({ id, kind, name, position, at: cum[best] });
   }
   return out.sort((a, b) => a.at - b.at);
