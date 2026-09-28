@@ -1,4 +1,4 @@
-import { bearing, turnAngle, type LatLng } from "./geo";
+import { bearing, distanceUnits, MILE, turnAngle, type LatLng } from "./geo";
 import { STOP_TYPE, type Step } from "./routes";
 
 /** The route being ridden: the planned one, or a way back spliced onto it. */
@@ -232,8 +232,19 @@ export function spliceRejoin(route: NavRoute, nav: Navigator, target: number, ba
   };
 }
 
-/** "400 metres", "1.5 kilometres": rounded the way a co-rider would say it. */
+/**
+ * "400 metres", "1.5 kilometres" (or "500 feet", "1.5 miles"): rounded the
+ * way a co-rider would say it.
+ */
 export function spokenDistance(m: number): string {
+  if (distanceUnits() === "mi") {
+    if (m >= 0.2 * MILE) {
+      const mi = Math.round((m / MILE) * 2) / 2 || 0.5;
+      return `${mi % 1 ? mi.toFixed(1) : mi} mile${mi === 1 ? "" : "s"}`;
+    }
+    const ft = m * 3.28084;
+    return `${ft >= 300 ? Math.round(ft / 100) * 100 : Math.max(100, Math.round(ft / 50) * 50)} feet`;
+  }
   if (m >= 950) {
     const km = Math.round(m / 500) / 2;
     return `${km % 1 ? km.toFixed(1) : km} kilometre${km === 1 ? "" : "s"}`;

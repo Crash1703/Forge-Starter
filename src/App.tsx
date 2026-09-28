@@ -5,8 +5,13 @@ import BottomSheet, { type Snap } from "./components/BottomSheet";
 import TwistGauge from "./components/TwistGauge";
 import RideView from "./components/RideView";
 import RidesPanel from "./components/RidesPanel";
+import Icon, { type IconName } from "./components/Icon";
+import SettingsScreen from "./components/SettingsScreen";
+import StopList from "./components/StopList";
 import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
-import { MAX_SPAN, SIGHT_ICONS, SIGHT_NAMES, sightsIn, type Bounds, type Sight } from "./lib/sights";
+import { applySettings, loadSettings, storeSettings, type Settings } from "./lib/settings";
+import { clearRecentSearches } from "./lib/places";
+import { MAX_SPAN, SIGHT_NAMES, sightsIn, type Bounds, type Sight } from "./lib/sights";
 import WeatherStrip from "./components/WeatherStrip";
 import StopsAlong from "./components/StopsAlong";
 import type { Poi } from "./lib/pois";
@@ -18,6 +23,7 @@ import MapErrorBoundary from "./components/MapErrorBoundary";
 import PlaceSearch from "./components/PlaceSearch";
 import ElevationChart from "./components/ElevationChart";
 import {
+  bestInsertIndex,
   countBends,
   curvinessLabel,
   distance,
@@ -63,11 +69,11 @@ const BUILD = (import.meta.env.VITE_BUILD_ID as string | undefined)?.slice(0, 7)
 
 type MapTheme = "auto" | "light" | "dark" | "topo";
 
-const MAP_LAYERS: { id: MapTheme; name: string; hint: string; icon: string }[] = [
-  { id: "auto", name: "Automatic", hint: "Day map, dark after sunset", icon: "◐" },
-  { id: "light", name: "Day", hint: "Road map", icon: "☀" },
-  { id: "dark", name: "Night", hint: "Dark road map", icon: "☾" },
-  { id: "topo", name: "Terrain", hint: "Hills, contours and tracks", icon: "⛰" },
+const MAP_LAYERS: { id: MapTheme; name: string; hint: string; icon: IconName }[] = [
+  { id: "auto", name: "Automatic", hint: "Day map, dark after sunset", icon: "clock" },
+  { id: "light", name: "Day", hint: "Road map", icon: "map" },
+  { id: "dark", name: "Night", hint: "Dark road map", icon: "eye" },
+  { id: "topo", name: "Terrain", hint: "Hills, contours and tracks", icon: "mountain" },
 ];
 const THEME_KEY = "forge.mapTheme";
 const loadTheme = (): MapTheme => {
@@ -118,9 +124,14 @@ export default function App() {
   const [loopStart, setLoopStart] = useState<LoopStart>("here");
   const [locating, setLocating] = useState(false);
   const [sightsOn, setSightsOn] = useState(false);
+  const [passesOn, setPassesOn] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [home, setHomeState] = useState<Home | null>(loadHome);
+  const [settings, setSettingsState] = useState<Settings>(loadSettings);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [menu, setMenu] = useState<"avoid" | "more" | null>(null);
+  /** Where the next searched place goes in the stop list (from a leg's +). */
+  const [insertAt, setInsertAt] = useState<number | null>(null);
   const [sights, setSights] = useState<Sight[]>([]);
   const [sightsNote, setSightsNote] = useState("");
   const [sight, setSight] = useState<Sight | null>(null);
@@ -141,7 +152,6 @@ export default function App() {
   const [rideLayer, setRideLayer] = useState<RideLayer | null>(null);
   const [followBreaks, setFollowBreaks] = useState(0);
   const wantFit = useRef(!!shared);
-  const dragFrom = useRef<number | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const route = routes[selected];
@@ -165,7 +175,7 @@ export default function App() {
   // Sights for the part of the map in view, re-checked as the map moves.
   useEffect(() => {
     const m = mapRef.current;
-    if (!sightsOn || !m) {
+    if ((!sightsOn && !passesOn) || !m) {
       setSights([]);
       setSightsNote("");
       return;
@@ -189,7 +199,7 @@ export default function App() {
       ctrl?.abort();
       ctrl = new AbortController();
       setSightsNote("Looking for sights…");
-      sightsIn(want, ctrl.signal)
+      sightsIn(want, ctrl.signal, { sights: sightsOn, passes: passesOn })
         .then((found) => {
           loaded = want;
           setSights(found);
@@ -208,7 +218,7 @@ export default function App() {
       clearTimeout(timer);
       ctrl?.abort();
     };
-  }, [sightsOn]);
+  }, [sightsOn, passesOn]);
 
   // Auto map theme: dark from dusk to dawn where the map is (checked every 5 minutes).
   useEffect(() => {
@@ -389,8 +399,31 @@ export default function App() {
     reverseGeocode(p).then((label) => setStops((ss) => ss.map((s) => (s.id === id ? { ...s, label } : s))));
   }, []);
 
+  function toggleHistory(on: boolean) {
+    setShowHistory(on);
+    try {
+      localStorage.setItem("forge.showRides", on ? "1" : "0");
+    } catch {
+      /* remembered for this visit */
+    }
+  }
+
+  function changeSettings(s: Settings) {
+    applySettings(s);
+    setSettingsState(s);
+    storeSettings(s);
+  }
+
   function addStop(position: LatLng, label?: string, at?: number) {
     const id = newId();
+    // "Set via points intelligently": fit it in where it adds the least riding.
+    if (at === undefined && settings.smartVias && stops.length >= 2) {
+      at = bestInsertIndex(
+        stops.map((s) => s.position),
+        position,
+        options.returnToStart,
+      );
+    }
     const stop = { id, position, label: label ?? "Locating…" };
     setStops((ss) => {
       const next = ss.slice();
@@ -510,7 +543,8 @@ export default function App() {
       flash("Set your home first");
       return;
     }
-    addStop(home.position, home.label);
+    // Home always goes on the end: it's where the ride finishes.
+    addStop(home.position, home.label, stops.length);
   }
 
   function openLoopScreen() {
@@ -741,6 +775,7 @@ export default function App() {
           followBreaks={followBreaks}
           onLayer={setRideLayer}
           onPause={(on) => recording.pause(on)}
+          energySaving={settings.energySaving}
           onExit={() => {
             setRiding(null);
             setRideLayer(null);
@@ -800,19 +835,21 @@ export default function App() {
                       </span>
                     ))}
                   <button className="link preview" onClick={() => setRiding({ simulate: true })} disabled={busy}>
-                    ▷ Preview ride
+                    <Icon name="play" size={14} filled /> Preview ride
                   </button>
                 </p>
                 <div className="summary-tools">
-                  <button onClick={customise}>✎ Customise</button>
+                  <button onClick={customise}>
+                    <Icon name="edit" size={18} /> Customise
+                  </button>
                   {isGeneratedLoop && (
                     <button onClick={() => makeLoop()} title="Same settings, a different loop">
-                      ⟳ Recalculate
+                      <Icon name="loop" size={18} /> Recalculate
                     </button>
                   )}
                   <div className="menu-wrap">
                     <button aria-expanded={menu === "avoid"} aria-haspopup="true" onClick={() => openMenu("avoid")}>
-                      Avoid{avoidCount ? ` (${avoidCount})` : ""} ▾
+                      Avoid{avoidCount ? ` (${avoidCount})` : ""} <Icon name="chevronDown" size={16} />
                     </button>
                     {menu === "avoid" && (
                       <div className="menu" role="group" aria-label="Avoid">
@@ -839,28 +876,28 @@ export default function App() {
                 </div>
                 <div className="summary-actions">
                   <button className="ride-go primary" onClick={startRide} disabled={busy}>
-                    ▲ Ride
+                    <Icon name="navigate" size={18} filled /> Ride
                   </button>
                   <button onClick={saveRoute} disabled={busy}>
                     Save
                   </button>
                   <div className="menu-wrap">
                     <button className="more" aria-label="More" aria-expanded={menu === "more"} aria-haspopup="true" onClick={() => openMenu("more")}>
-                      ⋯
+                      <Icon name="more" size={24} />
                     </button>
                     {menu === "more" && (
                       <div className="menu" role="menu">
                         <button role="menuitem" onClick={() => (setMenu(null), void share())}>
-                          ↗ Share
+                          <Icon name="share" size={18} /> Share
                         </button>
                         <button role="menuitem" onClick={() => (setMenu(null), exportGpx())}>
-                          ⤓ Export GPX
+                          <Icon name="download" size={18} /> Export GPX
                         </button>
                         <button role="menuitem" onClick={() => (setMenu(null), setRiding({ simulate: true }))}>
-                          ▷ Preview ride
+                          <Icon name="play" size={18} /> Preview ride
                         </button>
                         <button role="menuitem" onClick={() => (setMenu(null), setSnap("full"), setTab("plan"))}>
-                          ☰ Route details
+                          <Icon name="map" size={18} /> Route details
                         </button>
                       </div>
                     )}
@@ -879,6 +916,9 @@ export default function App() {
             ◆
           </span>
           <h1>Forge</h1>
+          <button className="settings-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
+            <Icon name="settings" size={22} />
+          </button>
           <nav className="tabs" role="tablist">
             <button role="tab" aria-selected={tab === "plan"} onClick={() => setTab("plan")}>
               Plan
@@ -895,75 +935,59 @@ export default function App() {
         {tab === "plan" ? (
           <div className="scroll">
             <section>
-              <div onFocusCapture={() => setSnap("full")} data-peek={route ? undefined : ""}>
-              <PlaceSearch
-                near={stops[stops.length - 1]?.position ?? center}
-                placeholder={stops.length ? "Add a stop or destination" : "Search for a start point"}
-                onPick={(label, p) => {
-                  addStop(p, label);
-                  setSnap("half");
-                }}
-              />
+              <div className="plan-search" onFocusCapture={() => setSnap("full")} data-peek={route ? undefined : ""}>
+                <PlaceSearch
+                  near={(insertAt != null ? stops[insertAt - 1] : stops[stops.length - 1])?.position ?? center}
+                  placeholder={
+                    insertAt != null && stops[insertAt - 1]
+                      ? `Add a stop after ${stops[insertAt - 1].label}`
+                      : stops.length
+                        ? "Add a stop or destination"
+                        : "Search for a start point"
+                  }
+                  onPick={(label, p) => {
+                    addStop(p, label, insertAt ?? undefined);
+                    setInsertAt(null);
+                    setSnap("half");
+                  }}
+                />
+                {insertAt != null && (
+                  <button className="link" onClick={() => setInsertAt(null)}>
+                    Add at the end instead
+                  </button>
+                )}
               </div>
               <p className="hint">Or tap the map to add stops. Tap the route line to add a stop there, and drag pins to adjust.</p>
 
-              {stops.length > 0 && (
-                <ol className="stops">
-                  {stops.map((s, i) => (
-                    <li
-                      key={s.id}
-                      draggable
-                      onDragStart={() => (dragFrom.current = i)}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={() => {
-                        if (dragFrom.current != null) reorder(dragFrom.current, i);
-                        dragFrom.current = null;
-                      }}
-                    >
-                      <StopBadge index={i} count={stops.length} loop={options.returnToStart} />
-                      <span className="label" title={s.label}>
-                        {s.label}
-                      </span>
-                      {(i < stops.length - 1 || (options.returnToStart && stops.length > 1)) && (
-                        <select
-                          className="leg-style"
-                          aria-label={`Ride style from ${s.label} to the next stop`}
-                          value={s.legStyle ?? ""}
-                          onChange={(e) =>
-                            setStops((ss) =>
-                              ss.map((x) => (x.id === s.id ? { ...x, legStyle: (e.target.value || undefined) as RouteStyle | undefined } : x)),
-                            )
-                          }
-                        >
-                          <option value="">↓ {STYLES.find((x) => x.id === options.style)?.name}</option>
-                          {STYLES.map((x) => (
-                            <option key={x.id} value={x.id}>
-                              ↓ {x.name}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                      <span className="row-actions">
-                        <button aria-label="Move up" disabled={i === 0} onClick={() => reorder(i, i - 1)}>
-                          ↑
-                        </button>
-                        <button aria-label="Move down" disabled={i === stops.length - 1} onClick={() => reorder(i, i + 1)}>
-                          ↓
-                        </button>
-                        <button aria-label="Remove stop" onClick={() => removeStop(s.id)}>
-                          ✕
-                        </button>
-                      </span>
-                    </li>
-                  ))}
-                  {options.returnToStart && stops.length > 1 && (
-                    <li className="finish-row">
-                      <span className="badge start">A</span>
-                      <span className="label">Back to {stops[0].label}</span>
-                    </li>
-                  )}
-                </ol>
-              )}
+              <StopList
+                stops={stops}
+                loop={options.returnToStart}
+                styles={STYLES}
+                routeStyle={options.style}
+                legs={route && !busy && route.legs.length === (options.returnToStart ? stops.length : stops.length - 1) ? route.legs : null}
+                onReorder={reorder}
+                onRemove={removeStop}
+                onLegStyle={(id, st) => setStops((ss) => ss.map((x) => (x.id === id ? { ...x, legStyle: st } : x)))}
+                onInsert={(at) => {
+                  setInsertAt(at);
+                  setSnap("full");
+                  requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".plan-search input")?.focus());
+                }}
+                onShow={(st) => {
+                  setSnap("peek");
+                  mapRef.current?.easeTo({ center: [st.position.lng, st.position.lat], zoom: Math.max(mapRef.current.getZoom(), 14) });
+                }}
+                onSetDestination={(id) => {
+                  setStops((ss) => [...ss.filter((x) => x.id !== id), ...ss.filter((x) => x.id === id)]);
+                  setOpt("returnToStart", false);
+                }}
+                onMenuOpen={() => setSnap("full")}
+                onRoundTrip={(st) => {
+                  setStops((ss) => [st, ...ss.filter((x) => x.id !== st.id)]);
+                  setLoopStart("first");
+                  setLoopScreen(true);
+                }}
+              />
 
               {stops.length > 1 && (
                 <label className="check loop-toggle">
@@ -981,10 +1005,12 @@ export default function App() {
               )}
 
               <div className="button-row">
-                <button onClick={locateMe}>◎ My location</button>
+                <button onClick={locateMe}>
+                  <Icon name="locate" size={18} /> My location
+                </button>
                 {!endsAtHome && (
                   <button onClick={goHome} title={home ? `Add ${home.label}` : "Set your home location"}>
-                    ⌂ {home ? (stops.length ? "Ride home" : "From home") : "Set home"}
+                    <Icon name="home" size={18} /> {home ? (stops.length ? "Ride home" : "From home") : "Set home"}
                   </button>
                 )}
                 {stops.length > 1 && (
@@ -994,7 +1020,7 @@ export default function App() {
                       setStops((ss) => reverseStops(ss, options.returnToStart))
                     }
                   >
-                    ⇅ Reverse
+                    <Icon name="swap" size={18} /> Reverse
                   </button>
                 )}
                 {stops.length > 0 && (
@@ -1060,11 +1086,11 @@ export default function App() {
               <p className="hint">A loop from your start, back home a different way.</p>
               <div className="button-row">
                 <button className="primary" onClick={openLoopScreen}>
-                  ↻ Plan a round trip
+                  <Icon name="loop" size={18} /> Plan a round trip
                 </button>
                 {isGeneratedLoop && (
                   <button onClick={() => makeLoop()} title="Same settings, a different loop">
-                    ⟳ Recalculate
+                    <Icon name="loop" size={18} /> Recalculate
                   </button>
                 )}
               </div>
@@ -1131,7 +1157,9 @@ export default function App() {
                       </button>
                     </div>
                     <div className="button-row">
-                      <button onClick={exportGpx}>⤓ GPX</button>
+                      <button onClick={exportGpx}>
+                        <Icon name="download" size={18} /> GPX
+                      </button>
                       <button onClick={share}>Share</button>
                       <button
                         onClick={() => {
@@ -1172,14 +1200,7 @@ export default function App() {
             rides={rides}
             selected={selectedRide}
             showHistory={showHistory}
-            onToggleHistory={(on) => {
-              setShowHistory(on);
-              try {
-                localStorage.setItem("forge.showRides", on ? "1" : "0");
-              } catch {
-                /* remembered for this visit */
-              }
-            }}
+            onToggleHistory={toggleHistory}
             onSelect={(r) => {
               setSelectedRide(r);
               if (r) setFitKey((k) => k + 1);
@@ -1192,7 +1213,7 @@ export default function App() {
         ) : (
           <div className="scroll">
             <section className="home-card">
-              <h2>⌂ Home</h2>
+              <h2>Home</h2>
               {home ? (
                 <p className="home-label">
                   <strong>{home.label}</strong>
@@ -1218,14 +1239,14 @@ export default function App() {
                     )
                   }
                 >
-                  ◎ Where I am now
+                  <Icon name="locate" size={18} /> Where I am now
                 </button>
               </div>
               <PlaceSearch near={home?.position ?? center} placeholder="Search for your home address" onPick={(label, p) => setHome({ label, position: p })} />
             </section>
             <section>
               <button className="wide" onClick={() => fileInput.current?.click()}>
-                ⤒ Import GPX
+                <Icon name="up" size={18} /> Import GPX
               </button>
               <div className="button-row">
                 <button onClick={backUp}>Back up routes &amp; rides</button>
@@ -1310,7 +1331,7 @@ export default function App() {
             onFollowBroken={() => setFollowBreaks((n) => n + 1)}
             onMapReady={(m) => (mapRef.current = m)}
             sights={sights}
-            home={home?.position ?? null}
+            home={settings.showHome ? (home?.position ?? null) : null}
             onSightClick={setSight}
             onMapClick={(p) => addStop(p)}
             onStopMove={moveStop}
@@ -1321,6 +1342,17 @@ export default function App() {
         {!riding && (
           <div className="map-chips">
             <button
+              className="chip-toggle round"
+              aria-label="Search for a place"
+              onClick={() => {
+                setTab("plan");
+                setSnap("full");
+                requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".plan-search input")?.focus());
+              }}
+            >
+              <Icon name="search" size={20} />
+            </button>
+            <button
               className="chip-toggle"
               aria-pressed={sightsOn}
               onClick={() => {
@@ -1328,9 +1360,19 @@ export default function App() {
                 setSight(null);
               }}
             >
-              <span aria-hidden>📷</span> Sights{sightsOn && <span aria-hidden> ✕</span>}
+              <Icon name="camera" size={18} /> Sights{sightsOn && <Icon name="close" size={16} />}
             </button>
-            {sightsOn && sightsNote && <span className="chip-note">{sightsNote}</span>}
+            <button
+              className="chip-toggle"
+              aria-pressed={passesOn}
+              onClick={() => {
+                setPassesOn((on) => !on);
+                setSight(null);
+              }}
+            >
+              <Icon name="mountain" size={18} /> Passes{passesOn && <Icon name="close" size={16} />}
+            </button>
+            {(sightsOn || passesOn) && sightsNote && <span className="chip-note">{sightsNote}</span>}
           </div>
         )}
         {!riding && layersOpen && (
@@ -1340,7 +1382,7 @@ export default function App() {
               {MAP_LAYERS.map((l) => (
                 <button key={l.id} role="radio" aria-checked={themePref === l.id} onClick={() => pickLayer(l.id)}>
                   <span className="layer-icon" aria-hidden>
-                    {l.icon}
+                    <Icon name={l.icon} size={20} />
                   </span>
                   <span>
                     <strong>{l.name}</strong>
@@ -1348,6 +1390,28 @@ export default function App() {
                   </span>
                 </button>
               ))}
+              <div className="layers-toggles" role="group" aria-label="Show on the map">
+                <label className="set-row">
+                  <span>
+                    <strong>My rides</strong>
+                    <small>Recorded rides as faint lines</small>
+                  </span>
+                  <input type="checkbox" role="switch" className="switch" checked={showHistory} onChange={(e) => toggleHistory(e.target.checked)} />
+                </label>
+                <label className="set-row">
+                  <span>
+                    <strong>Home</strong>
+                    <small>{home ? home.label : "Set it in the Saved tab"}</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    className="switch"
+                    checked={settings.showHome}
+                    onChange={(e) => changeSettings({ ...settings, showHome: e.target.checked })}
+                  />
+                </label>
+              </div>
             </div>
           </>
         )}
@@ -1356,7 +1420,8 @@ export default function App() {
             {sight.photo && <img src={sight.photo.replace(/width=\d+/, "width=480")} alt="" />}
             <div className="sight-body">
               <small>
-                {SIGHT_ICONS[sight.kind]} {SIGHT_NAMES[sight.kind]}
+                {SIGHT_NAMES[sight.kind]}
+                {sight.ele != null ? ` · ${sight.ele.toLocaleString()} m` : ""}
               </small>
               <strong>{sight.name}</strong>
               <div className="button-row">
@@ -1367,7 +1432,7 @@ export default function App() {
                     setSight(null);
                   }}
                 >
-                  ＋ Add as stop
+                  <Icon name="plus" size={18} /> Add as stop
                 </button>
                 <button
                   onClick={() => {
@@ -1376,7 +1441,7 @@ export default function App() {
                     openLoopScreen();
                   }}
                 >
-                  ↻ Loop via here
+                  <Icon name="loop" size={18} /> Loop via here
                 </button>
                 {sight.link && (
                   <a className="button" href={sight.link} target="_blank" rel="noreferrer">
@@ -1403,7 +1468,7 @@ export default function App() {
             aria-expanded={layersOpen}
             title="Map layers"
           >
-            <span aria-hidden>◇</span>
+            <Icon name="layers" size={22} />
             <small>{MAP_LAYERS.find((l) => l.id === themePref)?.name.replace("Automatic", "Auto")}</small>
           </button>
           <button
@@ -1412,17 +1477,17 @@ export default function App() {
             aria-label={recording.state ? "Stop recording" : "Record a ride"}
             title={recording.state ? "Stop recording" : "Record a ride"}
           >
-            <span aria-hidden>{recording.state ? "■" : "●"}</span>
+            <span aria-hidden>{recording.state ? <Icon name="stop" size={18} filled /> : "●"}</span>
           </button>
           <button className="fab" onClick={openLoopScreen} aria-label="Plan a round trip" title="Plan a round trip">
-            <span aria-hidden>↻</span>
+            <Icon name="loop" size={22} />
           </button>
           <button className="fab" onClick={centreOnMe} aria-label="Show my location">
-            <span aria-hidden>◎</span>
+            <Icon name="locate" size={22} />
           </button>
           {route && (
             <button className="fab" onClick={() => setFitKey((k) => k + 1)} aria-label="Zoom to route">
-              <span aria-hidden>⤢</span>
+              <Icon name="fit" size={22} />
             </button>
           )}
         </div>
@@ -1449,6 +1514,17 @@ export default function App() {
               </button>
             </div>
           </div>
+        )}
+        {settingsOpen && (
+          <SettingsScreen
+            settings={settings}
+            onChange={changeSettings}
+            onClearSearches={() => {
+              clearRecentSearches();
+              flash("Search history deleted");
+            }}
+            onClose={() => setSettingsOpen(false)}
+          />
         )}
         {loopScreen && (
           <RoundTripScreen
@@ -1481,11 +1557,6 @@ export default function App() {
   );
 }
 
-/** A for the start, B for the finish, numbers in between. On a loop A is also the finish. */
-function StopBadge({ index, count, loop }: { index: number; count: number; loop: boolean }) {
-  const kind = index === 0 ? "start" : index === count - 1 && !loop ? "end" : "via";
-  return <span className={`badge ${kind}`}>{kind === "start" ? "A" : kind === "end" ? "B" : index}</span>;
-}
 
 /** 1:05:09 or 5:09 */
 function formatClock(seconds: number): string {

@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
+import Icon, { type IconName } from "./Icon";
 import PlaceSearch from "./PlaceSearch";
 import { distance, formatDistance, type LatLng } from "../lib/geo";
 import { placesAhead, RIDE_PLACE_KINDS, type RidePlace, type RidePlaceKind } from "../lib/rideStops";
 
 export type AddMode = "via" | "finish";
+
+const KIND_ICONS: Record<RidePlaceKind, IconName> = { fuel: "fuel", food: "food", lookout: "eye", toilets: "toilet" };
 
 interface Props {
   /** Where the rider is. */
@@ -69,7 +72,7 @@ export default function RideAddStop({ from, ahead, onAdd, onClose }: Props) {
       <div className="ride-add-head">
         <strong>{picked ? picked.name : "Add a stop"}</strong>
         <button className="ride-add-close" aria-label="Close" onClick={onClose}>
-          ✕
+          <Icon name="close" size={20} />
         </button>
       </div>
       {picked ? (
@@ -103,14 +106,14 @@ export default function RideAddStop({ from, ahead, onAdd, onClose }: Props) {
                 aria-checked={kind === k.kind}
                 onClick={() => (kind === k.kind ? setAttempt((a) => a + 1) : setKind(k.kind))}
               >
-                <span aria-hidden>{k.icon}</span> {k.name}
+                <Icon name={KIND_ICONS[k.kind]} size={18} /> {k.name}
               </button>
             ))}
           </div>
           {note && <p className="ride-add-note">{note}</p>}
           {failed && (
             <button className="ride-add-retry" onClick={() => setAttempt((a) => a + 1)}>
-              ↻ Try again
+              <Icon name="loop" size={18} /> Try again
             </button>
           )}
           {places && places.length > 0 && (

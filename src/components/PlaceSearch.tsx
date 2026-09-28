@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { autocomplete, type Suggestion } from "../lib/places";
+import { autocomplete, recentSearches, rememberSearch, type Suggestion } from "../lib/places";
 import type { LatLng } from "../lib/geo";
 
 interface Props {
@@ -13,6 +13,8 @@ export default function PlaceSearch({ near, placeholder, onPick }: Props) {
   const [items, setItems] = useState<Suggestion[]>([]);
   const [active, setActive] = useState(0);
   const [error, setError] = useState("");
+  // Recent picks, shown when the box is focused and empty.
+  const [recent, setRecent] = useState<Suggestion[]>([]);
   const nearRef = useRef(near);
   nearRef.current = near;
 
@@ -39,7 +41,9 @@ export default function PlaceSearch({ near, placeholder, onPick }: Props) {
 
   function pick(s: Suggestion) {
     setItems([]);
+    setRecent([]);
     setText("");
+    rememberSearch(s);
     onPick(s.main, s.position);
   }
 
@@ -50,7 +54,12 @@ export default function PlaceSearch({ near, placeholder, onPick }: Props) {
         value={text}
         placeholder={placeholder}
         aria-label={placeholder}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          setRecent([]);
+        }}
+        onFocus={() => !text && setRecent(recentSearches())}
+        onBlur={() => setRecent([])}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown") setActive((a) => Math.min(a + 1, items.length - 1));
           else if (e.key === "ArrowUp") setActive((a) => Math.max(a - 1, 0));
@@ -60,6 +69,24 @@ export default function PlaceSearch({ near, placeholder, onPick }: Props) {
           e.preventDefault();
         }}
       />
+      {recent.length > 0 && items.length === 0 && (
+        <ul className="suggestions recent" role="listbox" aria-label="Recent searches">
+          {recent.map((s) => (
+            <li
+              key={`r-${s.id}`}
+              role="option"
+              aria-selected={false}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                pick(s);
+              }}
+            >
+              <strong>{s.main}</strong>
+              <span>{s.secondary || "Recent"}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {items.length > 0 && (
         <ul className="suggestions" role="listbox">
           {items.map((s, i) => (

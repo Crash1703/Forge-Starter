@@ -9,6 +9,7 @@ import {
   formatDuration,
   midpointOffset,
   outAndBack,
+  bestInsertIndex,
   crossings,
   findSpurs,
   loopLayout,
@@ -319,5 +320,24 @@ describe("crossings", () => {
 
   it("doesn't count a road ridden out and back as crossing", () => {
     expect(crossings([at(0, 0), at(5000, 0), at(0, 0)], null)).toHaveLength(0);
+  });
+});
+
+describe("bestInsertIndex", () => {
+  const o = { lat: -26.7, lng: 152.9 };
+  const at = (e: number, n = 0) => destination(destination(o, 90, e * 1000), 0, n * 1000);
+  it("puts a stop between the two it lies between", () => {
+    expect(bestInsertIndex([at(0), at(20), at(40)], at(10, 1), false)).toBe(1);
+    expect(bestInsertIndex([at(0), at(20), at(40)], at(30, 1), false)).toBe(2);
+  });
+  it("adds a stop beyond the finish on the end", () => {
+    expect(bestInsertIndex([at(0), at(20)], at(35), false)).toBe(2);
+  });
+  it("on a loop, can put it on the way home", () => {
+    const loop = [at(0), at(20, 0), at(20, 20)];
+    expect(bestInsertIndex(loop, at(8, 12), true)).toBe(3);
+  });
+  it("with one stop, adds after it", () => {
+    expect(bestInsertIndex([at(0)], at(5), false)).toBe(1);
   });
 });

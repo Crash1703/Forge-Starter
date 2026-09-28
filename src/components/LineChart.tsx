@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { LatLng } from "../lib/geo";
+import { formatDistance, type LatLng } from "../lib/geo";
 
 export interface ChartPoint {
   at: number; // metres along the ride
@@ -71,7 +71,7 @@ export default function LineChart({ points, unit, caption, label, onHover }: Pro
           0
         </text>
         <text x={W - PAD.r} y={H - 4} className="tick" textAnchor="end">
-          {(total / 1000).toFixed(0)} km
+          {formatDistance(total)}
         </text>
         {cur && (
           <g>
@@ -83,7 +83,7 @@ export default function LineChart({ points, unit, caption, label, onHover }: Pro
       <figcaption>
         {cur ? (
           <>
-            {(cur.at / 1000).toFixed(1)} km ·{" "}
+            {formatDistance(cur.at)} ·{" "}
             <strong>
               {Math.round(cur.value)} {unit}
             </strong>

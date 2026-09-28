@@ -11,7 +11,9 @@ A motorcycle-focused route planner in the spirit of Calimoto, built entirely on 
 - **Map-first design**: on phones the map fills the screen and the planner slides up from the bottom. A 0–10 twistiness gauge and bend count sit on the summary card, and the route line is coloured by twistiness (orange → red → purple). The route summary shows distance, time and bends, with **Customise** (edit the stops), **Recalculate** (on a generated loop), an **Avoid** menu (motorways, tolls, ferries), **Ride**, **Save**, and **⋯** for Share, GPX and a preview. The **◇ layers** button switches between an automatic map (dark after sunset), day, night and a **Terrain** map with contours and hill shading.
 - **Ride recording and logbook**: tap the red button on the map to record any ride. Rides in Ride mode record automatically. The **Rides** tab lists every ride with distance, riding time, average and top speed (a 5-second average, so GPS spikes don't count), bends, climb, an estimated lean angle (from speed and bend radius) and the twistiest 5 km, plus speed and elevation charts. You can export a ride as GPX, plan it again, or show all your rides as faint lines on the map. Rides are kept in the device's IndexedDB. The ride in progress is saved as a draft, so a crash or a killed app doesn't lose it.
 - **Weather on the way**: the forecast for when you'll actually reach each part of the route (leaving now, in 1–3 hours or tomorrow morning), with temperature, rain chance and wind, and a warning if rain is likely somewhere along the ride.
-- **Sights**: tap **📷 Sights** on the map to show lookouts, waterfalls, attractions, landmarks and more in view, as photo bubbles where Wikipedia has a picture. Tap one to add it as a stop, plan a loop via it, or open its Wikipedia page.
+- **Stop timeline**: the planner lists the route as a timeline: start, each leg with its ride style (tap to change it for that leg), distance and time, and a **+** to add a stop right there, then the stops and the finish. Each stop's **⋯** menu can show it on the map, make it the destination, start a round trip from it, move it or remove it. Longer lists fold into "N via points".
+- **Settings** (gear next to the title): kilometres or miles, 24 h or 12 h clock, light/dark/system theme, **Set via points intelligently** (new stops go where they add the least riding), energy-saving mode (the screen may sleep while navigating), and recent searches with **Delete search history**.
+- **Sights**: tap **Sights** on the map to show lookouts, waterfalls, attractions, landmarks and more in view, as photo bubbles where Wikipedia has a picture. Tap one to add it as a stop, plan a loop via it, or open its Wikipedia page. **Passes** shows mountain passes (with their height) the same way. The search button beside them jumps to the planner's search box, and the layers menu can hide your rides or home on the map.
 - **Fuel & cafés**: find fuel stations, cafés and bakeries near the route, shown on the map and listed by distance along the ride. Set your tank range and it warns about any stretch with no fuel for longer than that.
 - **Per-section ride styles**: give each leg its own style (say, fast to the hills, twisty through them, then fast home) from the menu next to each stop. Styles are kept in share links.
 - **Backup and restore**: the **Saved** tab can download all saved routes and recorded rides as one file and restore it, so you can move them between the website and the app, or to a new phone. Restoring merges; it doesn't delete anything.
@@ -90,6 +92,9 @@ src/
     RideAddStop.tsx       Ride mode's add-a-stop panel
     RidesPanel.tsx        ride logbook and ride details
     RoundTripScreen.tsx   the round trip page
+    StopList.tsx          the stop timeline in the planner
+    SettingsScreen.tsx    the settings page
+    Icon.tsx              line icons
     WeatherStrip.tsx      forecast along the route
     StopsAlong.tsx        fuel and cafés along the route, fuel-gap warnings
     MapErrorBoundary.tsx  keeps the planner usable if the map fails
@@ -112,6 +117,7 @@ src/
     sights.ts             sights in view (Overpass) with photos (Wikidata/Commons)
     rideStops.ts          fuel, food, lookouts and toilets along the road ahead
     overpass.ts           Overpass queries with time limits and mirror fallback
+    settings.ts           the rider's settings
 ```
 
 ## Limits to know about
