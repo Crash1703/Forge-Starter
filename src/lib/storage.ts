@@ -15,6 +15,8 @@ export interface Stop {
    * their shape with few pins.
    */
   shape?: LatLng[];
+  /** The rider named this stop: moving its pin keeps the name. */
+  named?: boolean;
 }
 
 /**

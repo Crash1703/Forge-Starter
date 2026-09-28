@@ -363,6 +363,21 @@ button.big { width: 100%; min-height: 56px; border-radius: 28px; font-size: 1.1r
 .sight-card strong { font-size: 1.05rem; }
 .sight-card .button-row { margin-top: 6px; }
 .sight-card .close { position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; padding: 0; border-radius: 50%; }
+.stop-card { grid-template-columns: 1fr; }
+.stop-card .sight-body { gap: 6px; }
+.stop-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.stop-card .stop-name { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 0; background: none; color: inherit; text-align: left; }
+.stop-card .stop-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stop-card .stop-name .icon { flex: none; color: var(--muted); }
+.stop-card .stop-rename { flex: 1; min-width: 0; }
+.stop-card .stop-rename input { width: 100%; }
+.stop-card-label { margin-top: 4px; font-weight: 600; }
+.stop-styles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.stop-styles button { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 6px 4px; font-size: 0.85rem; }
+.stop-styles button[aria-checked="true"] { background: var(--accent); color: #fff; }
+.stop-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.stop-actions button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 0.88rem; }
+.stop-card { max-height: calc(100dvh - var(--sat) - 66px - 260px); overflow-y: auto; }
 .sight-card .loop-pick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .sight-card .loop-pick small { flex-basis: 100%; }
 .sight-card .loop-pick button:not(.link) { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 0.9rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
