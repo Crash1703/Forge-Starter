@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import ElevationChart from "./ElevationChart";
 import Icon from "./Icon";
 import LineChart, { type ChartPoint } from "./LineChart";
-import { distance, formatDistance, formatDuration, type LatLng } from "../lib/geo";
+import { distance, formatDistance, formatDuration, formatTime, speedUnit, toSpeed, type LatLng } from "../lib/geo";
 import { elevationProfile, type ElevationProfile } from "../lib/elevation";
 import { speeds, trackPath, type RideRecord } from "../lib/recorder";
 
@@ -48,7 +48,7 @@ export default function RidesPanel(props: Props) {
               <button className="open" onClick={() => props.onSelect(r)}>
                 <strong>{r.name}</strong>
                 <span>
-                  {formatDistance(r.stats.distance)} · {formatDuration(r.stats.movingTime)} · top {Math.round(r.stats.maxSpeed)} km/h
+                  {formatDistance(r.stats.distance)} · {formatDuration(r.stats.movingTime)} · top {Math.round(toSpeed(r.stats.maxSpeed))} {speedUnit()}
                 </span>
                 <small>{date(r.startedAt)}</small>
               </button>
@@ -85,7 +85,7 @@ function RideDetail({ ride, onSelect, onDelete, onPlanAgain, onExport, onHover }
       if (i) at += distance(path[i - 1], path[i]);
       if (i % every) continue;
       const w = v.slice(Math.max(0, i - 2), i + 3);
-      out.push({ at, value: (w.reduce((a, b) => a + b, 0) / w.length) * 3.6, position: path[i] });
+      out.push({ at, value: toSpeed((w.reduce((a, b) => a + b, 0) / w.length) * 3.6), position: path[i] });
     }
     return out;
   }, [ride, path]);
@@ -98,7 +98,7 @@ function RideDetail({ ride, onSelect, onDelete, onPlanAgain, onExport, onHover }
         </button>
         <h3 className="ride-title">{ride.name}</h3>
         <p className="hint">
-          {date(ride.startedAt)} · {new Date(ride.startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+          {date(ride.startedAt)} · {formatTime(ride.startedAt)}
         </p>
         <dl className="stats">
           <div>
@@ -111,11 +111,15 @@ function RideDetail({ ride, onSelect, onDelete, onPlanAgain, onExport, onHover }
           </div>
           <div>
             <dt>Average</dt>
-            <dd>{Math.round(s.avgSpeed)} km/h</dd>
+            <dd>
+              {Math.round(toSpeed(s.avgSpeed))} {speedUnit()}
+            </dd>
           </div>
           <div>
             <dt>Top speed</dt>
-            <dd>{Math.round(s.maxSpeed)} km/h</dd>
+            <dd>
+              {Math.round(toSpeed(s.maxSpeed))} {speedUnit()}
+            </dd>
           </div>
           <div>
             <dt>Bends</dt>
@@ -132,10 +136,12 @@ function RideDetail({ ride, onSelect, onDelete, onPlanAgain, onExport, onHover }
             </div>
           )}
           {s.twistiest && (
-            <div title={`Twistiest 5 km: from km ${(s.twistiest.from / 1000).toFixed(0)} to ${(s.twistiest.to / 1000).toFixed(0)}`}>
+            <div title={`Twistiest stretch: from ${formatDistance(s.twistiest.from)} to ${formatDistance(s.twistiest.to)}`}>
               <dt>Twistiest</dt>
               <dd>
-                {s.twistiest.score.toFixed(1)} <small>km {(s.twistiest.from / 1000).toFixed(0)}–{(s.twistiest.to / 1000).toFixed(0)}</small>
+                {s.twistiest.score.toFixed(1)} <small>
+                  {formatDistance(s.twistiest.from)}–{formatDistance(s.twistiest.to)}
+                </small>
               </dd>
             </div>
           )}
@@ -145,9 +151,9 @@ function RideDetail({ ride, onSelect, onDelete, onPlanAgain, onExport, onHover }
         <h2>Speed</h2>
         <LineChart
           points={speedPoints}
-          unit="km/h"
-          label={`Speed along the ride, up to ${Math.round(s.maxSpeed)} km/h`}
-          caption={`Average ${Math.round(s.avgSpeed)} km/h while moving · top ${Math.round(s.maxSpeed)} km/h`}
+          unit={speedUnit()}
+          label={`Speed along the ride, up to ${Math.round(toSpeed(s.maxSpeed))} ${speedUnit()}`}
+          caption={`Average ${Math.round(toSpeed(s.avgSpeed))} ${speedUnit()} while moving · top ${Math.round(toSpeed(s.maxSpeed))} ${speedUnit()}`}
           onHover={onHover}
         />
       </section>

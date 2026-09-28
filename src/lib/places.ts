@@ -63,3 +63,40 @@ export async function reverseGeocode(p: LatLng): Promise<string> {
     return fallback;
   }
 }
+
+const RECENT_KEY = "forge.searches";
+const MAX_RECENT = 8;
+let keepRecent = true;
+
+/** Remember picked places (on by default; a setting turns it off). */
+export function setKeepRecentSearches(on: boolean) {
+  keepRecent = on;
+}
+
+export function recentSearches(): Suggestion[] {
+  if (!keepRecent) return [];
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
+    return Array.isArray(list) ? list.filter((s) => s?.main && Number.isFinite(s.position?.lat)) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberSearch(s: Suggestion) {
+  if (!keepRecent) return;
+  const list = [s, ...recentSearches().filter((r) => r.id !== s.id && r.main !== s.main)].slice(0, MAX_RECENT);
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch {
+    /* not kept; fine */
+  }
+}
+
+export function clearRecentSearches() {
+  try {
+    localStorage.removeItem(RECENT_KEY);
+  } catch {
+    /* nothing to clear */
+  }
+}

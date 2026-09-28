@@ -6,8 +6,11 @@ import TwistGauge from "./components/TwistGauge";
 import RideView from "./components/RideView";
 import RidesPanel from "./components/RidesPanel";
 import Icon, { type IconName } from "./components/Icon";
+import SettingsScreen from "./components/SettingsScreen";
 import StopList from "./components/StopList";
 import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
+import { applySettings, loadSettings, storeSettings, type Settings } from "./lib/settings";
+import { clearRecentSearches } from "./lib/places";
 import { MAX_SPAN, SIGHT_ICONS, SIGHT_NAMES, sightsIn, type Bounds, type Sight } from "./lib/sights";
 import WeatherStrip from "./components/WeatherStrip";
 import StopsAlong from "./components/StopsAlong";
@@ -20,6 +23,7 @@ import MapErrorBoundary from "./components/MapErrorBoundary";
 import PlaceSearch from "./components/PlaceSearch";
 import ElevationChart from "./components/ElevationChart";
 import {
+  bestInsertIndex,
   countBends,
   curvinessLabel,
   distance,
@@ -122,6 +126,8 @@ export default function App() {
   const [sightsOn, setSightsOn] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [home, setHomeState] = useState<Home | null>(loadHome);
+  const [settings, setSettingsState] = useState<Settings>(loadSettings);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [menu, setMenu] = useState<"avoid" | "more" | null>(null);
   /** Where the next searched place goes in the stop list (from a leg's +). */
   const [insertAt, setInsertAt] = useState<number | null>(null);
@@ -392,8 +398,22 @@ export default function App() {
     reverseGeocode(p).then((label) => setStops((ss) => ss.map((s) => (s.id === id ? { ...s, label } : s))));
   }, []);
 
+  function changeSettings(s: Settings) {
+    applySettings(s);
+    setSettingsState(s);
+    storeSettings(s);
+  }
+
   function addStop(position: LatLng, label?: string, at?: number) {
     const id = newId();
+    // "Set via points intelligently": fit it in where it adds the least riding.
+    if (at === undefined && settings.smartVias && stops.length >= 2) {
+      at = bestInsertIndex(
+        stops.map((s) => s.position),
+        position,
+        options.returnToStart,
+      );
+    }
     const stop = { id, position, label: label ?? "Locating…" };
     setStops((ss) => {
       const next = ss.slice();
@@ -513,7 +533,8 @@ export default function App() {
       flash("Set your home first");
       return;
     }
-    addStop(home.position, home.label);
+    // Home always goes on the end: it's where the ride finishes.
+    addStop(home.position, home.label, stops.length);
   }
 
   function openLoopScreen() {
@@ -744,6 +765,7 @@ export default function App() {
           followBreaks={followBreaks}
           onLayer={setRideLayer}
           onPause={(on) => recording.pause(on)}
+          energySaving={settings.energySaving}
           onExit={() => {
             setRiding(null);
             setRideLayer(null);
@@ -884,6 +906,9 @@ export default function App() {
             ◆
           </span>
           <h1>Forge</h1>
+          <button className="settings-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
+            <Icon name="settings" size={22} />
+          </button>
           <nav className="tabs" role="tablist">
             <button role="tab" aria-selected={tab === "plan"} onClick={() => setTab("plan")}>
               Plan
@@ -1442,6 +1467,17 @@ export default function App() {
               </button>
             </div>
           </div>
+        )}
+        {settingsOpen && (
+          <SettingsScreen
+            settings={settings}
+            onChange={changeSettings}
+            onClearSearches={() => {
+              clearRecentSearches();
+              flash("Search history deleted");
+            }}
+            onClose={() => setSettingsOpen(false)}
+          />
         )}
         {loopScreen && (
           <RoundTripScreen

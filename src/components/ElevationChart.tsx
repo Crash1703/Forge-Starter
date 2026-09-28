@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ElevationProfile } from "../lib/elevation";
-import type { LatLng } from "../lib/geo";
+import { formatDistance, type LatLng } from "../lib/geo";
 
 interface Props {
   profile: ElevationProfile;
@@ -56,7 +56,7 @@ export default function ElevationChart({ profile, onHover }: Props) {
         <path d={line} className="line" />
         <text x={PAD.l} y={H - 4} className="tick">0</text>
         <text x={W - PAD.r} y={H - 4} className="tick" textAnchor="end">
-          {(total / 1000).toFixed(0)} km
+          {formatDistance(total)}
         </text>
         {cur && (
           <g>
@@ -68,7 +68,7 @@ export default function ElevationChart({ profile, onHover }: Props) {
       <figcaption>
         {cur ? (
           <>
-            {(cur.at / 1000).toFixed(1)} km · <strong>{Math.round(cur.elevation)} m</strong>
+            {formatDistance(cur.at)} · <strong>{Math.round(cur.elevation)} m</strong>
           </>
         ) : (
           <>

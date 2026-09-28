@@ -1,3 +1,6 @@
+import { setDisplayPrefs } from "./geo";
+import { setKeepRecentSearches } from "./places";
+
 /** The rider's preferences, kept on the device. */
 export interface Settings {
   /** App colours: follow the phone, or always light or dark. */
@@ -53,4 +56,11 @@ export function applyTheme(theme: Settings["theme"]) {
   const root = document.documentElement;
   if (theme === "system") delete root.dataset.theme;
   else root.dataset.theme = theme;
+}
+
+/** Put settings into effect: colours, units and clock, search history. */
+export function applySettings(s: Settings) {
+  applyTheme(s.theme);
+  setDisplayPrefs({ units: s.units, clock: s.clock });
+  setKeepRecentSearches(s.keepSearches);
 }

@@ -3,7 +3,7 @@ import Icon from "./Icon";
 import ManeuverIcon from "./ManeuverIcon";
 import RideAddStop, { type AddMode } from "./RideAddStop";
 import type { RideLayer } from "./MapView";
-import { distance, formatDistance, formatDuration, type LatLng } from "../lib/geo";
+import { distance, formatDistance, formatDuration, formatTime, speedUnit, toSpeed, type LatLng } from "../lib/geo";
 import { Announcer, maneuverKind, Navigator, spliceRejoin, type Fix, type NavRoute, type NavState } from "../lib/navigation";
 import { routeBack, routeVia, speedLimits, type RouteOptions, type RouteResult } from "../lib/routes";
 import { askToShowRideNotification, keepScreenOn, simulateRide, speak, subscribeGps, type Stop } from "../lib/device";
@@ -17,6 +17,8 @@ interface Props {
   /** Bumped when the rider drags the map, which pauses following. */
   followBreaks: number;
   onLayer: (layer: RideLayer | null) => void;
+  /** Let the screen sleep while navigating (voice still guides). */
+  energySaving?: boolean;
   /** The rider paused (or resumed) the ride: hold recording too. */
   onPause?: (paused: boolean) => void;
   onExit: () => void;
@@ -31,7 +33,7 @@ const REROUTE_GAP_MS = 15_000;
  * speed and limit, time to go. Leave the route and it finds a way back onto
  * it ahead, instead of re-planning the whole ride.
  */
-export default function RideView({ route, options, loop, simulate, followBreaks, onLayer, onPause, onExit }: Props) {
+export default function RideView({ route, options, loop, simulate, followBreaks, onLayer, onPause, onExit, energySaving }: Props) {
   const plan: NavRoute = { path: route.path, steps: route.steps, distance: route.distance, duration: route.duration };
   const active = useRef<NavRoute>(plan);
   const nav = useRef(new Navigator(plan));
@@ -135,7 +137,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
 
     (async () => {
       if (!simulate) await askToShowRideNotification();
-      letSleep = await keepScreenOn().catch(() => () => undefined);
+      letSleep = energySaving ? () => undefined : await keepScreenOn().catch(() => () => undefined);
       letSleepRef.current = letSleep;
       stopGps = simulate
         ? simulateRide(route.path, onFix)
@@ -201,7 +203,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
       letSleepRef.current = () => undefined;
       say("Ride paused.");
     } else {
-      letSleepRef.current = await keepScreenOn().catch(() => () => undefined);
+      letSleepRef.current = energySaving ? () => undefined : await keepScreenOn().catch(() => () => undefined);
       // Don't go looking for a way back straight away if you've wandered off.
       lastReroute.current = Date.now() - REROUTE_GAP_MS + 5000;
       say("Resuming your ride.");
@@ -226,6 +228,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
   const n = nav.current;
   const showThen = next && after && n.cum[after.at] - n.cum[next.at] < 400;
   const speedKmh = state?.speed != null ? Math.round(state.speed * 3.6) : null;
+  const speedShown = speedKmh != null ? Math.round(toSpeed(speedKmh)) : null;
   const limit = state ? (limits.current[n.indexAt(state.along)] ?? null) : null;
   const over = limit != null && speedKmh != null && speedKmh > limit + 3;
   const eta = state ? new Date(Date.now() + state.remainingTime * 1000) : null;
@@ -315,17 +318,17 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
       )}
 
       <div className="ride-bottom">
-        <div className={`ride-speed${over ? " over" : ""}`} aria-label={speedKmh != null ? `${speedKmh} km/h` : "Speed unknown"}>
-          <strong>{speedKmh ?? "–"}</strong>
-          <small>km/h</small>
+        <div className={`ride-speed${over ? " over" : ""}`} aria-label={speedShown != null ? `${speedShown} ${speedUnit()}` : "Speed unknown"}>
+          <strong>{speedShown ?? "–"}</strong>
+          <small>{speedUnit()}</small>
         </div>
         {limit != null && (
-          <div className="ride-limit" aria-label={`Speed limit ${limit}`}>
-            {limit}
+          <div className="ride-limit" aria-label={`Speed limit ${Math.round(toSpeed(limit))}`}>
+            {Math.round(toSpeed(limit))}
           </div>
         )}
         <div className="ride-eta">
-          <strong>{eta ? eta.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "–"}</strong>
+          <strong>{eta ? formatTime(eta) : "–"}</strong>
           <span>{state ? `${formatDistance(state.remaining)} · ${formatDuration(state.remainingTime)}` : "starting…"}</span>
         </div>
         {!state?.arrived && !paused && (

@@ -507,8 +507,40 @@ export function midpointOffset(a: LatLng, b: LatLng, fraction: number): LatLng {
   return destination(mid, (brg + (fraction >= 0 ? 90 : 270)) % 360, Math.abs(fraction) * d);
 }
 
+/** Metres in a mile. */
+export const MILE = 1609.344;
+
+// Display preferences, set from the rider's settings.
+let units: "km" | "mi" = "km";
+let clock: "auto" | "24" | "12" = "auto";
+
+export function setDisplayPrefs(p: { units?: "km" | "mi"; clock?: "auto" | "24" | "12" }) {
+  if (p.units) units = p.units;
+  if (p.clock) clock = p.clock;
+}
+
+export const distanceUnits = () => units;
+
 export function formatDistance(m: number): string {
+  if (units === "mi") {
+    const mi = m / MILE;
+    if (mi < 0.1) return `${Math.round((m * 3.28084) / 10) * 10} ft`;
+    return mi >= 10 ? `${mi.toFixed(0)} mi` : `${mi.toFixed(1)} mi`;
+  }
   return m >= 10000 ? `${(m / 1000).toFixed(0)} km` : m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+}
+
+/** A speed in the rider's units (km/h in, km/h or mph out). */
+export const toSpeed = (kmh: number) => (units === "mi" ? kmh / 1.609344 : kmh);
+export const speedUnit = () => (units === "mi" ? "mph" : "km/h");
+
+/** A time of day, as "14:05" or "2:05 pm" per the rider's clock setting. */
+export function formatTime(t: number | Date): string {
+  return new Date(t).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    ...(clock === "auto" ? {} : { hour12: clock === "12" }),
+  });
 }
 
 export function formatDuration(s: number): string {
@@ -516,4 +548,28 @@ export function formatDuration(s: number): string {
   const h = Math.floor(s / 3600);
   const m = Math.round((s % 3600) / 60);
   return h ? `${h} h ${m.toString().padStart(2, "0")} min` : `${m} min`;
+}
+
+/**
+ * Where a new stop fits best among `stops` (in riding order): the gap it
+ * adds the least straight-line riding to, or on the end. On a loop the last
+ * gap is the ride home. Returns the index to insert at. The start stays first.
+ */
+export function bestInsertIndex(stops: LatLng[], p: LatLng, loop: boolean): number {
+  const n = stops.length;
+  if (n < 2) return n;
+  let best = n;
+  // Riding on from the last stop (not on a loop, which rides home from there).
+  let bestCost = loop ? Infinity : distance(stops[n - 1], p);
+  const gaps = loop ? n : n - 1;
+  for (let i = 0; i < gaps; i++) {
+    const a = stops[i];
+    const b = stops[(i + 1) % n];
+    const cost = distance(a, p) + distance(p, b) - distance(a, b);
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = i + 1;
+    }
+  }
+  return best;
 }

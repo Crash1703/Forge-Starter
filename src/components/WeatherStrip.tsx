@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatDistance, type LatLng } from "../lib/geo";
+import { formatDistance, formatTime, speedUnit, toSpeed, type LatLng } from "../lib/geo";
 import type { RouteResult } from "../lib/routes";
 import { rainAhead, weatherAlong, weatherIcon, type WeatherPoint } from "../lib/weather";
 
@@ -16,7 +16,7 @@ const LEAVING = [
   { label: "Tomorrow 8 am", hours: -1 },
 ];
 
-const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const clock = (t: number) => formatTime(t);
 
 function departureTime(hours: number): number {
   if (hours >= 0) return Date.now() + hours * 3600_000;
@@ -86,7 +86,7 @@ export default function WeatherStrip({ route, onHover }: Props) {
               <strong>{Math.round(p.temp)}°</strong>
               <small>{clock(p.eta)}</small>
               <small aria-label={`${p.rainChance}% chance of rain`}>💧{p.rainChance}%</small>
-              <small aria-label={`Wind ${Math.round(p.wind)} km/h`}>🌬{Math.round(p.wind)}</small>
+              <small aria-label={`Wind ${Math.round(toSpeed(p.wind))} ${speedUnit()}`}>🌬{Math.round(toSpeed(p.wind))}</small>
             </li>
           ))}
         </ol>
