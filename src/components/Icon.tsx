@@ -19,6 +19,8 @@ const PATHS = {
   fuel: "M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h12M4 10h10M14 13h2a2 2 0 0 1 2 2v2a1.5 1.5 0 0 0 3 0V9l-3-3",
   food: "M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10M17 21V3c-2 1-3 4-3 7h3",
   eye: "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+  coffee: "M4 9h12v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V9zM16 10h1.5a2.5 2.5 0 0 1 0 5H16M7 3v3M10 3v3M13 3v3",
+  beer: "M6 8h10v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8zM16 11h1.5a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H16M6 8a3 3 0 0 1 3-4 3.5 3.5 0 0 1 6 1 2.5 2.5 0 0 1 1 3M9 12v5M13 12v5",
   toilet: "M7 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM17 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5 21v-6H4l1.5-6h3L10 15H9v6M15 21V9h4v12M12 3v18",
   pause: "M8 5v14M16 5v14",
   play: "M7 4l13 8-13 8V4z",
@@ -53,6 +55,12 @@ const PATHS = {
 } as const;
 
 export type IconName = keyof typeof PATHS;
+
+/** The icon for each kind of place along a route. */
+export const POI_ICONS = { fuel: "fuel", cafe: "coffee", food: "food", pub: "beer", toilets: "toilet", lookout: "eye" } as const satisfies Record<
+  string,
+  keyof typeof PATHS
+>;
 
 /** The same icon as SVG markup, for map markers built outside React. */
 export function iconSvg(name: IconName, size = 20): string {

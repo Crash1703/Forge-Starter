@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import Icon, { type IconName } from "./Icon";
+import Icon, { POI_ICONS } from "./Icon";
 import PlaceSearch from "./PlaceSearch";
 import { distance, formatDistance, type LatLng } from "../lib/geo";
 import { knownPlaces, placesAhead, RIDE_PLACE_KINDS, type RidePlace, type RidePlaceKind } from "../lib/rideStops";
@@ -14,7 +14,7 @@ function mergePlaces(a: RidePlace[], b: RidePlace[]): RidePlace[] {
   return out.sort((x, y) => (x.ahead == null ? 1 : 0) - (y.ahead == null ? 1 : 0) || (x.ahead ?? x.away) - (y.ahead ?? y.away));
 }
 
-const KIND_ICONS: Record<RidePlaceKind, IconName> = { fuel: "fuel", food: "food", lookout: "eye", toilets: "toilet" };
+
 
 interface Props {
   /** Where the rider is. */
@@ -121,7 +121,7 @@ export default function RideAddStop({ from, ahead, onAdd, onClose, known = [] }:
                 aria-checked={kind === k.kind}
                 onClick={() => (kind === k.kind ? setAttempt((a) => a + 1) : setKind(k.kind))}
               >
-                <Icon name={KIND_ICONS[k.kind]} size={18} /> {k.name}
+                <Icon name={POI_ICONS[k.kind]} size={18} /> {k.name}
               </button>
             ))}
           </div>

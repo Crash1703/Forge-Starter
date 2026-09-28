@@ -8,7 +8,7 @@ import type { RouteResult } from "../lib/routes";
 import type { Stop } from "../lib/storage";
 import type { Poi } from "../lib/pois";
 import { type Sight, type SightKind } from "../lib/sights";
-import { iconSvg, type IconName } from "./Icon";
+import { iconSvg, POI_ICONS, type IconName } from "./Icon";
 
 const SIGHT_ICON: Record<SightKind, IconName> = {
   viewpoint: "eye",
@@ -313,7 +313,7 @@ export default function MapView(props: Props) {
     poiMarkers.current = (props.ride ? [] : (props.pois ?? [])).map((p) => {
       const el = document.createElement("div");
       el.className = `poi poi-${p.kind}`;
-      el.innerHTML = iconSvg(p.kind === "fuel" ? "fuel" : "food", 16);
+      el.innerHTML = iconSvg(POI_ICONS[p.kind], 16);
       el.title = p.name;
       return new Marker({ element: el }).setLngLat([p.position.lng, p.position.lat]).addTo(m);
     });

@@ -504,3 +504,14 @@ button.primary:hover:not(:disabled) { filter: brightness(1.05); }
 .poi { color: #222; }
 .layers-toggles { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
 .layers-toggles .set-row { padding: 8px 10px; min-height: 52px; }
+
+/* On the way: kinds of stop along the route */
+.along-kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.6em, 1fr)); gap: 6px; margin-bottom: 8px; }
+.along-kind { min-height: 44px; gap: 6px; font-weight: 600; background: var(--field); border: 1px solid var(--line); }
+.along-kind[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.along-kind small { font-weight: 700; opacity: 0.85; }
+.along-kind.busy { animation: along-busy 1s ease-in-out infinite alternate; }
+.along-kind.failed { border-color: var(--danger); }
+@keyframes along-busy { from { opacity: 1; } to { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .along-kind.busy { animation: none; } }
+.along-list button { justify-content: flex-start; }
