@@ -20,6 +20,7 @@ import ElevationChart from "./components/ElevationChart";
 import {
   countBends,
   curvinessLabel,
+  distance,
   formatDistance,
   formatDuration,
   isDaylight,
@@ -38,12 +39,15 @@ import { saveFile, shareableUrl, shareLink } from "./lib/native";
 import {
   decodeShare,
   encodeShare,
+  loadHome,
   loadSaved,
   newId,
   normalizeLoop,
   reverseStops,
   routePoints,
+  storeHome,
   storeSaved,
+  type Home,
   type SavedRoute,
   type Stop,
 } from "./lib/storage";
@@ -115,6 +119,7 @@ export default function App() {
   const [locating, setLocating] = useState(false);
   const [sightsOn, setSightsOn] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
+  const [home, setHomeState] = useState<Home | null>(loadHome);
   const [menu, setMenu] = useState<"avoid" | "more" | null>(null);
   const [sights, setSights] = useState<Sight[]>([]);
   const [sightsNote, setSightsNote] = useState("");
@@ -487,13 +492,39 @@ export default function App() {
     requestAnimationFrame(() => document.querySelector(".stops")?.scrollIntoView({ block: "start", behavior: "smooth" }));
   }
 
+  function setHome(h: Home | null) {
+    setHomeState(h);
+    const kept = storeHome(h);
+    flash(!h ? "Home removed" : kept ? `Home set: ${h.label}` : "Home set for this visit only (browser storage is blocked)");
+  }
+
+  // Already finishing at home: a loop from home, or a route whose last stop is home.
+  const atHome = (p?: LatLng) => !!home && !!p && distance(p, home.position) < 100;
+  const endsAtHome = options.returnToStart ? atHome(stops[0]?.position) : stops.length > 0 && atHome(stops[stops.length - 1].position);
+
+  /** "Home": start from home on an empty plan, otherwise ride home at the end. */
+  function goHome() {
+    if (!home) {
+      setTab("saved");
+      setSnap("full");
+      flash("Set your home first");
+      return;
+    }
+    addStop(home.position, home.label);
+  }
+
   function openLoopScreen() {
-    setLoopStart(stops.length ? "first" : "here");
+    setLoopStart(stops.length ? "first" : home ? "home" : "here");
     setLoopScreen(true);
   }
 
   /** "Create a round trip": from where the rider is now, or from stop A. */
   function createLoop() {
+    if (loopStart === "home" && home) {
+      setLoopScreen(false);
+      makeLoop(undefined, false, { id: newId(), position: home.position, label: home.label });
+      return;
+    }
     if (loopStart === "first") {
       setLoopScreen(false);
       makeLoop();
@@ -572,7 +603,7 @@ export default function App() {
   }
 
   function backUp() {
-    const data = { app: "ride-forge", version: 1, savedAt: Date.now(), routes: saved, rides };
+    const data = { app: "ride-forge", version: 1, savedAt: Date.now(), routes: saved, rides, home };
     const day = new Date().toISOString().slice(0, 10);
     saveFile(`ride-forge-backup-${day}.json`, JSON.stringify(data), "application/json")
       .then(() => flash(`Backed up ${saved.length} routes and ${rides.length} rides`))
@@ -592,6 +623,12 @@ export default function App() {
       const newRides = incoming.filter((r) => r?.id && Array.isArray(r.points) && !rides.some((x) => x.id === r.id));
       for (const r of newRides) await putRide(r);
       refreshRides();
+      // Home comes back too, unless one is already set here.
+      const h = data.home;
+      if (!home && h && Number.isFinite(h.position?.lat) && Number.isFinite(h.position?.lng)) {
+        setHomeState({ label: String(h.label || "Home"), position: h.position });
+        storeHome({ label: String(h.label || "Home"), position: h.position });
+      }
       flash(`Restored ${newRoutes.length} routes and ${newRides.length} rides`);
     } catch (e) {
       flash((e as Error).message || "Couldn't read that backup");
@@ -944,6 +981,11 @@ export default function App() {
 
               <div className="button-row">
                 <button onClick={locateMe}>◎ My location</button>
+                {!endsAtHome && (
+                  <button onClick={goHome} title={home ? `Add ${home.label}` : "Set your home location"}>
+                    ⌂ {home ? (stops.length ? "Ride home" : "From home") : "Set home"}
+                  </button>
+                )}
                 {stops.length > 1 && (
                   <button
                     onClick={() =>
@@ -1148,6 +1190,38 @@ export default function App() {
           />
         ) : (
           <div className="scroll">
+            <section className="home-card">
+              <h2>⌂ Home</h2>
+              {home ? (
+                <p className="home-label">
+                  <strong>{home.label}</strong>
+                  <button className="link" onClick={() => setHome(null)}>
+                    Remove
+                  </button>
+                </p>
+              ) : (
+                <p className="hint">Set your home to start loops from it and ride home in one tap.</p>
+              )}
+              <div className="button-row">
+                {stops[0] && (
+                  <button onClick={() => setHome({ label: stops[0].label === "My location" ? "Home" : stops[0].label, position: stops[0].position })}>
+                    Use stop A
+                  </button>
+                )}
+                <button
+                  onClick={() =>
+                    navigator.geolocation?.getCurrentPosition(
+                      (pos) => setHome({ label: "Home", position: { lat: pos.coords.latitude, lng: pos.coords.longitude } }),
+                      () => flash("Couldn't get your location"),
+                      { enableHighAccuracy: true, timeout: 10000 },
+                    )
+                  }
+                >
+                  ◎ Where I am now
+                </button>
+              </div>
+              <PlaceSearch near={home?.position ?? center} placeholder="Search for your home address" onPick={(label, p) => setHome({ label, position: p })} />
+            </section>
             <section>
               <button className="wide" onClick={() => fileInput.current?.click()}>
                 ⤒ Import GPX
@@ -1235,6 +1309,7 @@ export default function App() {
             onFollowBroken={() => setFollowBreaks((n) => n + 1)}
             onMapReady={(m) => (mapRef.current = m)}
             sights={sights}
+            home={home?.position ?? null}
             onSightClick={setSight}
             onMapClick={(p) => addStop(p)}
             onStopMove={moveStop}
@@ -1391,6 +1466,7 @@ export default function App() {
             start={loopStart}
             onStart={setLoopStart}
             firstStop={stops[0]?.label}
+            home={home?.label}
             near={stops[0]?.position ?? center}
             busy={locating}
             onCreate={createLoop}

@@ -51,6 +51,8 @@ interface Props {
   /** Sights to show as photo bubbles. */
   sights?: Sight[];
   onSightClick?: (s: Sight) => void;
+  /** The rider's home, marked with a house. */
+  home?: LatLng | null;
   onMapClick: (p: LatLng) => void;
   onStopMove: (id: string, p: LatLng) => void;
   onRouteClick: (p: LatLng, legIndex: number) => void;
@@ -338,6 +340,19 @@ export default function MapView(props: Props) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.sights, !!props.ride]);
+
+  const homeMarker = useRef<Marker | null>(null);
+  useEffect(() => {
+    const m = map.current;
+    homeMarker.current?.remove();
+    homeMarker.current = null;
+    if (!m || !props.home) return;
+    const el = document.createElement("div");
+    el.className = "home-pin";
+    el.textContent = "⌂";
+    el.title = "Home";
+    homeMarker.current = new Marker({ element: el }).setLngLat([props.home.lng, props.home.lat]).addTo(m);
+  }, [props.home?.lat, props.home?.lng]);
 
   // Ride mode: the road ahead in blue on top.
   useEffect(() => {
