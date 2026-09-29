@@ -554,43 +554,28 @@ button.primary:hover:not(:disabled) { filter: brightness(1.05); }
 .token-row input { min-height: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--field); color: var(--text); font-size: 1rem; }
 .set-row > button { white-space: nowrap; flex: none; }
 
-/* Page tabs at the bottom (Rides · Map · Profile), as in Calimoto. */
-.bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: grid; grid-template-columns: repeat(3, 1fr); background: var(--panel); border-top: 1px solid var(--line); padding: 6px 8px calc(6px + var(--sab)); }
-.bottom-nav button { display: grid; justify-items: center; gap: 2px; background: none; border: none; color: var(--muted); font-size: 0.85rem; font-weight: 600; padding: 2px 0; min-height: 0; box-shadow: none; }
-.bottom-nav button[aria-current="page"] { color: var(--text); }
-.bottom-nav .nav-pill { display: grid; place-items: center; padding: 4px 20px; border-radius: 16px; }
-.bottom-nav button[aria-current="page"] .nav-pill { background: var(--field); }
-.sheet.above-bar { padding-bottom: 0; }
-@media (min-width: 761px) {
-  .bottom-nav { right: auto; width: 380px; border-right: 1px solid var(--line); }
-  .app:not(.riding) .panel { padding-bottom: 68px; }
-}
+/* Direct ↔ Adventure: how far routes may stray for better roads. */
+.detour-slider { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 12px; margin-top: 12px; font-size: 0.9rem; font-weight: 600; }
+.detour-slider input { width: 100%; accent-color: var(--accent); }
+.detour-slider .detour-ends { grid-column: 2; display: flex; justify-content: space-between; color: var(--muted); font-weight: 400; }
 
-/* Rides and Profile pages */
-.page { position: fixed; inset: 0; z-index: 20; overflow-y: auto; background: var(--bg); color: var(--text); padding: var(--sat) var(--sar) calc(90px + var(--sab)) var(--sal); }
-.page-body { max-width: 560px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
-.page-title { font-size: 2rem; margin: 18px 0 4px; letter-spacing: -0.01em; }
-.page-group { margin: 12px 0 0; font-size: 1.1rem; text-transform: none; letter-spacing: 0; color: var(--text); }
-.ride-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.ride-card { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 6px; padding: 16px; border-radius: 16px; background: var(--field); border: none; text-align: left; color: var(--text); }
-.ride-card strong { font-size: 1.05rem; }
-.ride-card span { color: var(--muted); }
-.ride-card.wide span { font-size: 0.85rem; }
-.page-rows { border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
-.page-row { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px 16px; background: none; border: none; border-bottom: 1px solid var(--line); border-radius: 0; text-align: left; color: var(--text); box-sizing: border-box; }
-.page-rows > :last-child { border-bottom: none; }
-.page-row > span { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.page-row small { color: var(--muted); }
-.page-row .icon { flex: none; }
-.page-row.vehicle { padding: 0 8px 0 0; }
-.page-row .vehicle-pick { flex: 1; display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: none; border: none; text-align: left; color: var(--text); min-width: 0; }
-.page-row .vehicle-pick > span { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.page-row.vehicle.active .vehicle-pick .icon { color: var(--accent); }
-.page-row .icon-btn { background: none; border: none; padding: 8px; color: var(--muted); }
-.page-row-body { display: grid; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
-.vehicle-form label { display: grid; gap: 4px; font-size: 0.9rem; font-weight: 600; }
-.profile-head { display: grid; justify-items: center; gap: 10px; padding: 24px 0 6px; }
-.profile-head .avatar { display: grid; place-items: center; width: 110px; height: 110px; border-radius: 50%; background: var(--field); }
-.profile-head .profile-name { display: flex; align-items: center; gap: 8px; background: none; border: none; color: var(--text); font-size: 1.2rem; }
-.profile-head .profile-name .icon { color: var(--muted); }
-.profile-head input { text-align: center; font-size: 1.1rem; }
+/* Round trips: the loops on offer after trying several shapes. */
+.loop-note { margin: 0 0 6px; font-size: 0.85rem; color: var(--muted); }
+.loop-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; margin: 4px 16px 0; }
+.loop-choices button { display: grid; gap: 2px; justify-items: start; padding: 8px 10px; border-radius: 12px; text-align: left; }
+.loop-choices button small { color: var(--muted); font-size: 0.78rem; }
+.loop-choices button[aria-checked="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* RideScore: overall 0–100 and what makes it up. */
+.ride-score, .panel section.ride-score { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; padding: 10px 12px; margin: 4px 16px 10px; border: none; border-radius: 14px; background: var(--field); }
+.ride-score-head { display: grid; justify-items: center; }
+.ride-score-head strong { font-size: 2rem; line-height: 1; color: var(--accent); }
+.ride-score-head span { display: grid; justify-items: center; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.ride-score-head small { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); }
+.ride-score dl { margin: 0; display: grid; gap: 3px; }
+.ride-score dl > div { display: grid; grid-template-columns: 4.2em 1fr; align-items: center; gap: 8px; font-size: 0.8rem; }
+.ride-score dt { color: var(--muted); }
+.ride-score dd { margin: 0; display: grid; grid-template-columns: 1fr 2em; align-items: center; gap: 6px; }
+.ride-score .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.ride-score .bar > span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.ride-score .num { text-align: right; font-variant-numeric: tabular-nums; }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bearing,
+  bendAnalysis,
   compassName,
   curviness,
   curvinessLabel,
@@ -236,6 +237,46 @@ describe("bends and sections", () => {
     }
     for (let k = 0; k < 6; k++) pts.push(destination(pts[pts.length - 1], heading, 50));
     expect(countBends(pts)).toBe(8);
+  });
+
+  it("doesn't count street corners as bends, or as twisty road", () => {
+    // A suburban grid: 400 m blocks, turning right then left at each corner.
+    const grid = [origin];
+    let heading = 0;
+    for (let i = 0; i < 8; i++) {
+      for (let k = 0; k < 8; k++) grid.push(destination(grid[grid.length - 1], heading, 50));
+      heading = (heading + (i % 2 ? -90 : 90) + 360) % 360;
+    }
+    for (let k = 0; k < 8; k++) grid.push(destination(grid[grid.length - 1], heading, 50));
+    const r = bendAnalysis(grid);
+    expect(r.bends).toBe(0);
+    expect(r.junctions).toBe(8);
+    expect(curviness(grid)).toBeLessThan(10);
+    expect(r.score).toBe(0);
+  });
+
+  it("scores a flowing mountain road far above a gentle one", () => {
+    // Arcs of 90° at 60 m radius, alternating, joined by short straights.
+    const road = (radius: number, arcs: number) => {
+      const pts = [origin];
+      let heading = 0;
+      for (let i = 0; i < arcs; i++) {
+        const dir = i % 2 ? -1 : 1;
+        const stepDeg = (10 / radius) * (180 / Math.PI); // 10 m steps
+        for (let turned = 0; turned < 90; turned += stepDeg) {
+          heading = (heading + dir * stepDeg + 360) % 360;
+          pts.push(destination(pts[pts.length - 1], heading, 10));
+        }
+        for (let k = 0; k < 3; k++) pts.push(destination(pts[pts.length - 1], heading, 20));
+      }
+      return pts;
+    };
+    const tight = bendAnalysis(road(60, 20));
+    const gentle = bendAnalysis(road(900, 4));
+    expect(tight.bends).toBe(20);
+    expect(tight.junctions).toBe(0);
+    expect(tight.score).toBeGreaterThan(85);
+    expect(gentle.score).toBeLessThan(20);
   });
 
   it("scores twistiness from 0 to 10", () => {

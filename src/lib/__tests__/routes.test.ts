@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { destination, distance } from "../geo";
-import { costing, defaultOptions, planRoute, planSections, routeVia, snapToRoad, spurWarning, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
+import { costing, defaultOptions, planRoute, planSections, routeVia, slowestAllowed, snapToRoad, spurWarning, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
 
 /** Encode points as a precision-6 polyline, the format Valhalla returns. */
 function encode6(pts: [number, number][]): string {
@@ -41,6 +41,14 @@ describe("costing", () => {
       costing_options: { auto: { use_highways: 1, use_tolls: 0, use_ferry: 0.5, exclude_unpaved: true } },
     });
     expect(costing({ ...fast, avoidHighways: true }).costing_options).toMatchObject({ auto: { use_highways: 0 } });
+  });
+
+  it("lets routes stray further from the quickest the more adventurous the setting", () => {
+    expect(slowestAllowed({ ...defaultOptions, detour: 0 })).toBeCloseTo(1.15);
+    expect(slowestAllowed(defaultOptions)).toBeCloseTo(1.6);
+    expect(slowestAllowed({ ...defaultOptions, detour: 1 })).toBeCloseTo(2.05);
+    const { detour: _, ...old } = defaultOptions;
+    expect(slowestAllowed(old as typeof defaultOptions)).toBeCloseTo(1.6);
   });
 
   it("keeps motorcycles off dirt roads unless the rider allows them", () => {
