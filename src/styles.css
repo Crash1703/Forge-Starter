@@ -579,3 +579,12 @@ button.primary:hover:not(:disabled) { filter: brightness(1.05); }
 .ride-score .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .ride-score .bar > span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
 .ride-score .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* "Would you like to save your ride?" before a ride is discarded: a sheet over the dimmed map. */
+.discard-shade { position: fixed; inset: 0; z-index: 40; background: rgb(0 0 0 / 0.45); display: flex; align-items: flex-end; justify-content: center; }
+.discard-sheet { width: 100%; max-width: 520px; display: grid; gap: 10px; background: var(--panel); color: var(--text); border-radius: 18px 18px 0 0; padding: 10px 24px calc(var(--sab) + 24px); box-shadow: 0 -6px 24px rgb(0 0 0 / 0.25); text-align: center; }
+.discard-sheet .sheet-grip { justify-self: center; width: 44px; height: 4px; border-radius: 2px; background: var(--line); margin-bottom: 8px; }
+.discard-sheet h2 { margin: 4px 0 0; font-size: 1.6rem; line-height: 1.2; color: var(--text); text-transform: none; letter-spacing: normal; }
+.discard-sheet p { margin: 0 0 12px; color: var(--muted); }
+.discard-sheet button { min-height: 50px; border-radius: 12px; font-weight: 600; justify-content: center; }
+.discard-sheet button.discard { background: color-mix(in srgb, var(--danger) 16%, transparent); border-color: transparent; color: var(--danger); }

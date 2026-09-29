@@ -157,6 +157,7 @@ export default function App() {
     }
   });
   const [confirmStop, setConfirmStop] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [pois, setPois] = useState<Poi[]>([]);
   const backupInput = useRef<HTMLInputElement>(null);
   const autoRecord = useRef(false);
@@ -343,9 +344,12 @@ export default function App() {
     );
   }
 
+  const toastTimer = useRef(0);
   const flash = useCallback((msg: string) => {
     setToast(msg);
-    window.setTimeout(() => setToast(""), 2500);
+    // A newer message gets its full time on screen, not what's left of the last one's.
+    clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(""), 2500);
   }, []);
 
   const refreshRides = useCallback(() => {
@@ -782,11 +786,32 @@ export default function App() {
   // Dirt roads are avoided unless turned off, so only the rider's own choices count.
   const avoidCount = [options.avoidHighways && options.style === "fastest", options.avoidTolls, options.avoidFerries].filter(Boolean).length;
 
+  /** Start again: the planned route and its stops go (saved routes stay). `message` is shown as a toast. */
+  const discardRide = (message: string) => {
+    setConfirmDiscard(false);
+    setStops([]);
+    setName("");
+    setLoopChoices([]);
+    setStopCardId(null);
+    setSnap("peek");
+    if (message) flash(message);
+  };
+
   /** Open (or close) a summary menu, with room below it in the planner. */
   function openMenu(which: "avoid" | "more") {
     setMenu((m) => (m === which ? null : which));
     setSnap((s) => (s === "peek" ? "half" : s));
   }
+
+  // A menu that runs off the bottom of the screen pulls the sheet up so all of it shows.
+  useEffect(() => {
+    if (!menu) return;
+    const t = window.setTimeout(() => {
+      const box = document.querySelector(".summary .menu")?.getBoundingClientRect();
+      if (box && box.bottom > window.innerHeight) setSnap("full");
+    }, 350);
+    return () => clearTimeout(t);
+  }, [menu]);
 
   // A tap anywhere outside an open menu closes it.
   useEffect(() => {
@@ -1187,6 +1212,9 @@ export default function App() {
                         </button>
                         <button role="menuitem" onClick={() => (setMenu(null), setSnap("full"), setTab("plan"))}>
                           <Icon name="map" size={18} /> Route details
+                        </button>
+                        <button role="menuitem" className="danger-text" onClick={() => (setMenu(null), setConfirmDiscard(true))}>
+                          <Icon name="trash" size={18} /> Discard ride
                         </button>
                       </div>
                     )}
@@ -1964,6 +1992,23 @@ export default function App() {
         )}
         {toast && <div className="toast">{toast}</div>}
       </main>
+      {/* Outside the map, so it sits above the planner sheet too. */}
+      {confirmDiscard && (
+        <div className="discard-shade" onClick={() => setConfirmDiscard(false)}>
+          <div className="discard-sheet" role="dialog" aria-modal="true" aria-labelledby="discard-title" onClick={(e) => e.stopPropagation()}>
+            <span className="sheet-grip" aria-hidden />
+            <h2 id="discard-title">Would you like to save your ride?</h2>
+            <p>Save it and it stays in Saved, ready to plan further or ride later. Discard it to clear the route and its stops and start again.</p>
+            <button className="primary" onClick={() => (saveRoute(), discardRide(""))}>
+              Save
+            </button>
+            <button className="discard" onClick={() => discardRide("Ride discarded")}>
+              Discard ride
+            </button>
+            <button onClick={() => setConfirmDiscard(false)}>Back to planning</button>
+          </div>
+        </div>
+      )}
       <input
         ref={backupInput}
         type="file"
