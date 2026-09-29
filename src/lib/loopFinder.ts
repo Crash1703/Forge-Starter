@@ -55,6 +55,7 @@ export async function onRoads(
     return { lat: all.reduce((a, p) => a + p.lat, 0) / all.length, lng: all.reduce((a, p) => a + p.lng, 0) / all.length };
   });
   let pending = rings.flatMap((r, i) => r.map((_, k) => [i, k] as const));
+  const stranded: (readonly [number, number])[] = [];
   for (let round = 0; round < 3 && pending.length; round++) {
     const found = await locate(pending.map(([i, k]) => out[i][k]));
     // No answer at all (offline, server busy): plan from the points as they are.
@@ -68,8 +69,17 @@ export async function onRoads(
         out[i][k] = { lat: p.lat + (middles[i].lat - p.lat) * PULL, lng: p.lng + (middles[i].lng - p.lng) * PULL };
         next.push([i, k]);
       }
+      // Still nothing (well out to sea): see below.
+      else stranded.push([i, k]);
     });
     pending = next;
+  }
+  // A point with no road anywhere near takes the nearest of its loop's
+  // points that found one, rather than staying where no route can reach.
+  for (const [i, k] of stranded) {
+    const onRoad = out[i].filter((_, j) => !stranded.some(([si, sk]) => si === i && sk === j));
+    if (!onRoad.length) continue;
+    out[i][k] = onRoad.reduce((a, b) => (distance(b, out[i][k]) < distance(a, out[i][k]) ? b : a));
   }
   return out;
 }

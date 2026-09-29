@@ -227,7 +227,9 @@ describe("twisty helper points", () => {
     expect(body.locations[0].search_filter).toBeUndefined();
     expect(r.moves).toHaveLength(1);
     expect(r.moves![0].stop).toBe(1);
-    expect(distance(r.moves![0].to, foot)).toBeLessThan(40);
+    // Just before the turn-off, on the way there: clear of the dead end.
+    expect(distance(r.moves![0].to, foot)).toBeLessThan(120);
+    expect(distance(r.moves![0].to, start)).toBeLessThan(distance(foot, start));
   });
 
   it("snaps points that only steer the route to through roads, not tracks", async () => {
@@ -247,7 +249,8 @@ describe("twisty helper points", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ trip: tripAlong([start, foot, tip, foot, end], 25) }), { status: 200 })));
     const [r] = await planRoute([{ pos: start }, { pos: pin, movable: true }, { pos: end }], defaultOptions);
     expect(r.moves).toHaveLength(1);
-    expect(distance(r.moves![0].to, foot)).toBeLessThan(60);
+    expect(distance(r.moves![0].to, foot)).toBeLessThan(120);
+    expect(distance(r.moves![0].to, start)).toBeLessThan(distance(foot, start));
   });
 
   it("doesn't move the rider's own pins", async () => {

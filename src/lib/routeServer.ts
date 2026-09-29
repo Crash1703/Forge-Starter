@@ -74,16 +74,18 @@ async function askGraphHopper(base: string, path: string, body: unknown, signal:
     // Points the app placed itself snap only to proper roads (Valhalla's
     // search_filter): a loop's shaping points onto through roads, not a
     // side street or a forestry track the route would ride up and back.
-    const b: ValhallaRouteBody = {
-      ...b0,
-      locations: await Promise.all(
-        b0.locations.map(async (l) => {
-          if (!l.search_filter?.min_road_class) return l;
-          const at = await snap(l, profileOf(b0.costing), l.search_filter.min_road_class);
-          return at ? { ...l, ...at } : l;
-        }),
-      ),
-    };
+    // With no proper road near (deep in a forest, say), any rideable road
+    // will do; a shaping point with no road near at all is skipped rather
+    // than failing the whole route, as Valhalla's radius would allow.
+    const snapped = await Promise.all(
+      b0.locations.map(async (l) => {
+        if (!l.search_filter?.min_road_class) return l;
+        const profile = profileOf(b0.costing);
+        const at = (await snap(l, profile, l.search_filter.min_road_class)) ?? (await snap(l, profile));
+        return at ? { ...l, ...at } : l.type === "through" ? null : l;
+      }),
+    );
+    const b: ValhallaRouteBody = { ...b0, locations: snapped.filter((l): l is NonNullable<typeof l> => !!l) };
     const res = await post("/route", ghRouteRequest(b));
     const answer = (await res.json().catch(() => ({}))) as { paths?: GhPath[]; message?: string };
     if (!res.ok || !answer.paths?.length) return json({ error: answer.message ?? "No route found" }, res.status >= 500 ? res.status : 400);
