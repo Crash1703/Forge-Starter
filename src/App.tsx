@@ -12,7 +12,8 @@ import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
 import StopCard from "./components/StopCard";
 import RideScoreCard from "./components/RideScoreCard";
 import { rideScore, roadFacts, type RoadFacts } from "./lib/rideScore";
-import { loopShapes, pickLoops, scoreLoop, type LoopShape, type ScoredLoop } from "./lib/loopChoice";
+import type { LoopChoice, LoopShape } from "./lib/loopChoice";
+import { findLoops as findLoopsAround, type FoundLoop } from "./lib/loopFinder";
 import { requestsAtOnce } from "./lib/routeServer";
 import { applySettings, loadSettings, storeSettings, type Settings } from "./lib/settings";
 import { clearRecentSearches } from "./lib/places";
@@ -622,7 +623,7 @@ export default function App() {
   /** How many loop shapes are being tried (0 when not searching). */
   const [findingLoop, setFindingLoop] = useState(0);
   /** The loops on offer after a search: the one ridden is `loopChoice`. */
-  const [loopChoices, setLoopChoices] = useState<{ label: string; heading: number; scale: number; km: number; curves: number }[]>([]);
+  const [loopChoices, setLoopChoices] = useState<{ label: string; heading: number; scale: number; ring: LatLng[]; km: number; curves: number }[]>([]);
   const [loopChoice, setLoopChoice] = useState(0);
   /** The place a loop was made to visit, as its stop (so Recalculate knows the loop is ours to redo). */
   const [placeStopId, setPlaceStopId] = useState<string | null>(null);
@@ -730,55 +731,56 @@ export default function App() {
   }
 
   /**
-   * A new round trip: try several loop shapes with one quick request each,
-   * score them (bends, length, no road ridden twice, no crossing over), then
-   * plan the best balance properly and offer the curviest and one heading
-   * another way as alternatives.
+   * A new round trip: try several loop shapes, tidy up the most promising
+   * (off dead ends, nearer the asked length), then plan the best balance
+   * properly and offer the curviest and one heading another way as
+   * alternatives (see loopFinder).
    */
   async function findLoops(origin: Stop, length: number, km?: number) {
     loopSearch.current?.abort();
     const ctrl = new AbortController();
     loopSearch.current = ctrl;
     const atOnce = requestsAtOnce();
-    const shapes = loopShapes(atOnce > 2 ? 8 : 6, loopDir);
+    const count = atOnce > 2 ? 8 : 6;
     const opts = { ...options, returnToStart: true };
-    const target = length * 1000;
     setLoopChoices([]);
-    setFindingLoop(shapes.length);
-    const ringOf = (s: LoopShape) => roundTripWaypoints(origin.position, target * s.scale, s.heading, 5);
-    const scored: ScoredLoop[] = [];
+    setFindingLoop(count);
+    let choices: LoopChoice[] = [];
     try {
-      for (let i = 0; i < shapes.length; i += atOnce) {
-        await Promise.all(
-          shapes.slice(i, i + atOnce).map(async (s) => {
-            const ring = ringOf(s);
-            const r = await quickPlan(planPoints(loopStops(origin, ring, [1, 3], -1, null), true), opts, ctrl.signal);
-            if (r) scored.push(scoreLoop(s, r, target, origin.position, [origin.position, ...ring]));
-          }),
-        );
-      }
+      ({ choices } = await findLoopsAround(
+        {
+          origin: origin.position,
+          targetMetres: length * 1000,
+          heading: loopDir,
+          count,
+          atOnce,
+          plan: (ring) => quickPlan(planPoints(loopStops(origin, ring, [1, 3], -1, null), true), opts, ctrl.signal),
+        },
+        ctrl.signal,
+      ));
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
     } finally {
       if (loopSearch.current === ctrl) setFindingLoop(0);
     }
     if (ctrl.signal.aborted) return;
-    const choices = pickLoops(scored);
-    // Nothing answered (offline, server busy): fall back to one loop, planned the usual way.
-    const first = choices[0]?.loop ?? shapes[0];
     loopContext.current = { origin, length, km };
-    setLoopChoices(choices.map((c) => ({ label: c.label, heading: c.loop.heading, scale: c.loop.scale, km: c.loop.route.distance / 1000, curves: c.loop.curves })));
+    setLoopChoices(
+      choices.map((c) => ({ label: c.label, heading: c.loop.heading, scale: c.loop.scale, ring: (c.loop as FoundLoop).ring, km: c.loop.route.distance / 1000, curves: c.loop.curves })),
+    );
     setLoopChoice(0);
-    takeLoopShape(first);
+    // Nothing answered (offline, server busy): fall back to one loop, planned the usual way.
+    const first = choices[0]?.loop as FoundLoop | undefined;
+    takeLoopShape(first ?? { heading: loopDir ?? Math.random() * 360, scale: 1 });
   }
 
-  /** Build the loop for one of the tried shapes. */
-  function takeLoopShape(s: LoopShape) {
+  /** Build the loop for one of the tried shapes (through the points it was tidied to, if any). */
+  function takeLoopShape(s: LoopShape & { ring?: LatLng[] }) {
     const ctx = loopContext.current;
     if (!ctx) return;
     loopShape.current.heading = s.heading;
     loopShape.current.scale = s.scale;
-    const ring = roundTripWaypoints(ctx.origin.position, ctx.length * 1000 * s.scale, s.heading, 5);
+    const ring = s.ring ?? roundTripWaypoints(ctx.origin.position, ctx.length * 1000 * s.scale, s.heading, 5);
     applyLoop(ctx.origin, ring, [1, 3], -1, null, false, true, ctx.length, ctx.km);
   }
 

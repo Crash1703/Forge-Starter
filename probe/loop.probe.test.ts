@@ -1,8 +1,8 @@
 // Temporary: runs the round-trip pipeline against the real route server and
 // prints how clean each loop is. Not part of the app or its tests.
 import { test } from "vitest";
-import { distance, findSpurs, loopLayout, resample, roundTripWaypoints, type LatLng } from "../src/lib/geo";
-import { loopShapes, pickLoops, scoreLoop, type LoopShape, type ScoredLoop } from "../src/lib/loopChoice";
+import { distance, findSpurs, loopLayout, resample, type LatLng } from "../src/lib/geo";
+import { findLoops, type FoundLoop } from "../src/lib/loopFinder";
 import { defaultOptions, planRoute, quickPlan, type RouteOptions, type RoutePoint, type RouteResult } from "../src/lib/routes";
 import { routePoints, type Stop } from "../src/lib/storage";
 
@@ -43,23 +43,18 @@ function report(tag: string, r: RouteResult, home: LatLng, extra: Record<string,
 
 async function scenario(name: string, home: LatLng, km: number, heading: number | null, opts: RouteOptions) {
   const origin: Stop = { id: "home", label: "home", position: home };
-  const target = km * 1000;
-  const shapes = loopShapes(6, heading, () => 0.5);
-  const scored: ScoredLoop[] = [];
-  for (const s of shapes) {
-    const ring = roundTripWaypoints(home, target * s.scale, s.heading, 5);
-    const r = await quickPlan(planPoints(loopStops(origin, ring), true), opts);
-    if (!r) { console.log(`${name} shape ${s.heading.toFixed(0)}/${s.scale}: no route`); continue; }
-    const sc = scoreLoop(s, r, target, home, [home, ...ring]);
-    scored.push(sc);
-    report(`${name} quick h${s.heading.toFixed(0)} x${s.scale}`, r, home, { balance: Math.round(sc.balance), curves: Math.round(sc.curves), acc: Math.round(sc.accuracy), overlap: +sc.overlap.toFixed(2), cross: sc.crossings });
-  }
-  const choices = pickLoops(scored);
+  const t0 = Date.now();
+  let requests = 0;
+  const { choices, loops } = await findLoops({
+    origin: home, targetMetres: km * 1000, heading, count: 6, atOnce: 2, random: () => 0.5,
+    plan: (ring) => (requests++, quickPlan(planPoints(loopStops(origin, ring), true), opts)),
+  });
+  console.log(`${name}: ${requests} quick requests, ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+  for (const l of loops) report(`${name} quick h${l.heading.toFixed(0)} x${l.scale}`, l.route, home, { balance: Math.round(l.balance), curves: Math.round(l.curves), acc: Math.round(l.accuracy), overlap: +l.overlap.toFixed(2), deadEnds: +l.deadEnds.toFixed(2), cross: l.crossings });
   for (const c of choices) {
-    const s: LoopShape = c.loop;
-    const ring = roundTripWaypoints(home, target * s.scale, s.heading, 5);
+    const ring = (c.loop as FoundLoop).ring;
     const [r] = await planRoute(planPoints(loopStops(origin, ring), true), opts);
-    report(`${name} FULL ${c.label} h${s.heading.toFixed(0)} x${s.scale}`, r, home, { moves: r.moves?.length ?? 0, ring: ring.map(fmt) });
+    report(`${name} FULL ${c.label} h${c.loop.heading.toFixed(0)} x${c.loop.scale}`, r, home, { moves: r.moves?.length ?? 0 });
     if (c.label === "Best balance") console.log(`PATH ${name} ${JSON.stringify({ ring: ring.map(fmt), path: resample(r.path, 300).map(fmt) })}`);
   }
 }
