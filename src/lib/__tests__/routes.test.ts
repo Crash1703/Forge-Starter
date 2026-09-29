@@ -253,6 +253,26 @@ describe("twisty helper points", () => {
     expect(distance(r.moves![0].to, start)).toBeLessThan(distance(foot, start));
   });
 
+  it("moves a point on the far side of a divided road back along the way out", async () => {
+    // Out along one carriageway (a straight: just its two ends), up a side
+    // road and back along the other, 15 m off with a point every 25 m, then
+    // off south at the corner; the pin sits on the way back. It moves back
+    // along the way out, not the way back, whose points lie nearer the
+    // corner where the two ways part.
+    const corner = destination(start, 90, 1000);
+    const far = destination(corner, 90, 3000);
+    const back = (m: number) => destination(destination(far, 180, 15), 270, m);
+    const path = [start, far, destination(far, 0, 400), destination(far, 180, 15)];
+    for (let m = 25; m <= 3000; m += 25) path.push(back(m));
+    for (let m = 25; m <= 3000; m += 25) path.push(destination(back(3000), 180, m));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ trip: tripAlong(path, 12) }), { status: 200 })));
+    const [r] = await planRoute([{ pos: start }, { pos: back(1500), movable: true }, { pos: path[path.length - 1] }], defaultOptions);
+    expect(r.moves).toHaveLength(1);
+    const to = r.moves![0].to;
+    expect(Math.abs(to.lat - corner.lat) * 111000).toBeLessThan(5);
+    expect(distance(to, corner)).toBeLessThan(distance(back(1500), corner));
+  });
+
   it("doesn't move the rider's own pins", async () => {
     const tip = destination(start, 90, 8000);
     const foot = destination(tip, 180, 500);

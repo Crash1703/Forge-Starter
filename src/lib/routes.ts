@@ -456,15 +456,21 @@ const BEFORE_TURN_OFF_M = 50;
  * there can't snap back onto the dead end itself.
  */
 function beforeTurnOff(path: LatLng[], turnOff: LatLng): LatLng {
-  let at = 0;
-  for (let i = 1; i < path.length; i++) if (distance(path[i], turnOff) < distance(path[at], turnOff)) at = i;
+  // The way out reaches the turn-off first; the way back passes it again,
+  // maybe nearer (the other side of a divided road). So: the first time the
+  // route comes within SPUR_TOLERANCE_M, compared every 20 m, as a straight
+  // road can have its points hundreds of metres apart.
+  const pts = resample(path, 20);
+  let at = pts.findIndex((p) => distance(p, turnOff) < SPUR_TOLERANCE_M);
+  if (at < 0) at = pts.reduce((best, p, i) => (distance(p, turnOff) < distance(pts[best], turnOff) ? i : best), 0);
+  while (at + 1 < pts.length && distance(pts[at + 1], turnOff) < distance(pts[at], turnOff)) at++;
   // Walk back along the route from there, BEFORE_TURN_OFF_M in all.
-  let left = BEFORE_TURN_OFF_M + distance(path[at], turnOff);
+  let left = BEFORE_TURN_OFF_M + distance(pts[at], turnOff);
   for (let i = at; i > 0; i--) {
-    const d = distance(path[i], path[i - 1]);
+    const d = distance(pts[i], pts[i - 1]);
     if (d >= left) {
       const f = left / d;
-      return { lat: path[i].lat + (path[i - 1].lat - path[i].lat) * f, lng: path[i].lng + (path[i - 1].lng - path[i].lng) * f };
+      return { lat: pts[i].lat + (pts[i - 1].lat - pts[i].lat) * f, lng: pts[i].lng + (pts[i - 1].lng - pts[i].lng) * f };
     }
     left -= d;
   }
