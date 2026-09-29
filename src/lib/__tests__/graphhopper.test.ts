@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VALHALLA_URL } from "../config";
-import { edgesFromKnown, edgesFromMatch, ghRouteRequest, roadsOf, styleModel, tripFromPath, type GhPath, type ValhallaRouteBody } from "../graphhopper";
+import { edgesFromKnown, edgesFromMatch, ghRouteRequest, ghSnapRequest, roadsOf, styleModel, tripFromPath, type GhPath, type ValhallaRouteBody } from "../graphhopper";
 import { decodePolyline, encodePolyline } from "../polyline";
 import { routerFetch, setRouteServer } from "../routeServer";
 
@@ -36,12 +36,23 @@ describe("asking GraphHopper in Valhalla's terms", () => {
     expect(m.priority.at(-1)).toEqual({ if: "in_x0", multiply_by: "0" });
   });
 
-  it("asks for no turning round at loop points, and alternatives between two points", () => {
-    expect(ghRouteRequest(body(["break", "through", "break_through", "break"])).pass_through).toBe(true);
-    expect(ghRouteRequest(body(["break", "break", "break"])).pass_through).toBe(false);
+  it("never bans turning round (it makes loops circle blocks), and asks for alternatives between two points", () => {
+    expect(ghRouteRequest(body(["break", "through", "break_through", "break"])).pass_through).toBe(false);
     const two = ghRouteRequest(body(["break", "break"], { alternates: 2 }));
     expect(two).toMatchObject({ profile: "motorcycle", algorithm: "alternative_route", "alternative_route.max_paths": 3, points_encoded_multiplier: 1e6 });
     expect(two.points[0]).toEqual([153.1, -26.8]);
+  });
+
+  it("snaps points only onto roads of the asked class, as Valhalla's search_filter does", () => {
+    const p = { lat: -26.8, lon: 153.1 };
+    const through = ghSnapRequest(p, "motorcycle", "tertiary");
+    expect(through.points).toEqual([[153.1, -26.8], [153.1, -26.8]]);
+    const rule = through.custom_model.priority[0];
+    for (const c of ["UNCLASSIFIED", "RESIDENTIAL", "SERVICE", "TRACK"]) expect(rule.if).toContain(`road_class == ${c}`);
+    expect(rule.multiply_by).toBe("0");
+    expect(ghSnapRequest(p, "motorcycle", "unclassified").custom_model.priority[0].if).not.toContain("UNCLASSIFIED");
+    // No filter: any road the profile can ride.
+    expect(ghSnapRequest(p, "car").custom_model.priority).toEqual([]);
   });
 
   it("splits the answer into legs at stops, not at shaping points", () => {
