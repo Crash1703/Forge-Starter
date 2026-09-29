@@ -6,6 +6,8 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // The app's own plugins register before the bridge starts.
+        registerPlugin(LockScreenPlugin.class);
         super.onCreate(savedInstanceState);
         applyFontSize();
     }
