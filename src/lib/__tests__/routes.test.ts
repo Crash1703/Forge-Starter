@@ -622,7 +622,23 @@ describe("snapping a pin to the road", () => {
     expect(await snapToRoad(paddock, defaultOptions)).toEqual(road);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toMatch(/\/locate$/);
-    expect(JSON.parse(init.body as string)).toMatchObject({ costing: "motorcycle", locations: [{ lat: paddock.lat, lon: paddock.lng }] });
+    // Asks for a proper road and for any road at once.
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      costing: "motorcycle",
+      locations: [{ lat: paddock.lat, lon: paddock.lng, search_filter: { min_road_class: "unclassified" } }, { lat: paddock.lat, lon: paddock.lng }],
+    });
+  });
+
+  it("prefers a proper road nearby over a nearer side street, so the route doesn't ride up it and back", async () => {
+    const answer = (through: number) => {
+      const edge = (q: { lat: number; lng: number }) => ({ correlated_lat: q.lat, correlated_lon: q.lng });
+      // First location: proper roads only; second: any road.
+      return new Response(JSON.stringify([{ edges: [edge(destination(paddock, 0, through))] }, { edges: [edge(destination(paddock, 90, 20))] }]));
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => answer(250)));
+    expect(distance(await snapToRoad(paddock, defaultOptions), destination(paddock, 0, 250))).toBeLessThan(1);
+    vi.stubGlobal("fetch", vi.fn(async () => answer(600)));
+    expect(distance(await snapToRoad(paddock, defaultOptions), destination(paddock, 90, 20))).toBeLessThan(1);
   });
 
   it("leaves the pin where it is when the nearest road is far away, or the router doesn't answer", async () => {

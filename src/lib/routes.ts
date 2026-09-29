@@ -165,6 +165,12 @@ export interface RoutePoint {
    */
   movable?: boolean;
   /**
+   * The rider tapped or dragged it roughly here: like a generated point, it
+   * may move off a dead end or a U-turn (see `RouteResult.moves`), but it
+   * snaps as the rider's pins do.
+   */
+  tapped?: boolean;
+  /**
    * A shaping point: the route passes near it without stopping, and it
    * doesn't split the route into legs or count as a numbered stop.
    */
@@ -413,6 +419,34 @@ async function uncrossLoop(
   return { summary: { length: sum((l) => l.summary.length), time: sum((l) => l.summary.time) }, legs };
 }
 
+/** A generated point this close to a U-turn is taken to be what made the route turn round. */
+const UTURN_REACH = 400;
+
+/**
+ * Where the way out to a U-turn at `path[at]` began: walking back from the
+ * U-turn, the last point the way back also passes (within
+ * SPUR_TOLERANCE_M). Its index in `path`.
+ */
+function retraceStart(path: LatLng[], at: number): number {
+  let start = at;
+  let back = 0;
+  for (let i = at - 1; i >= 0 && back < 20000; i--) {
+    back += distance(path[i], path[i + 1]);
+    let retraced = false;
+    let ahead = 0;
+    for (let j = at + 1; j < path.length && ahead < back + 500; j++) {
+      ahead += distance(path[j - 1], path[j]);
+      if (distance(path[i], path[j]) < SPUR_TOLERANCE_M) {
+        retraced = true;
+        break;
+      }
+    }
+    if (!retraced) break;
+    start = i;
+  }
+  return start;
+}
+
 /** Out and back counts as the same road within this many metres (either side of a divided road). */
 const SPUR_TOLERANCE_M = 40;
 /** How far back along the route from a dead end's turn-off a moved point goes. */
@@ -549,7 +583,7 @@ export async function planRoute(
       let best = -1;
       let bestDist = MOVE_REACH;
       points.forEach((p, i) => {
-        if (!p.movable || i === 0 || i === points.length - 1 || moves.some((m) => m.stop === i)) return;
+        if (!(p.movable || p.tapped) || i === 0 || i === points.length - 1 || moves.some((m) => m.stop === i)) return;
         const reached = numbers[i] > 0 ? reachedStop(r, numbers[i]) : null;
         const d = Math.min(distance(p.pos, spur.tip), distance(reached ?? p.pos, spur.tip));
         if (d < bestDist) {
@@ -559,6 +593,24 @@ export async function planRoute(
       });
       if (best > 0) moves.push({ stop: best, to: beforeTurnOff(r.path, spur.base) });
     }
+    // Each U-turn the router makes (short ones too, which aren't a spur
+    // worth the name) near a generated point: the point moves back to where
+    // the way out and back began, so the route no longer goes up there.
+    r.steps.forEach((st) => {
+      if (st.type !== 12 && st.type !== 13) return;
+      const at = r.path[st.at];
+      let best = -1;
+      let bestDist = UTURN_REACH;
+      points.forEach((p, i) => {
+        if (!(p.movable || p.tapped) || i === 0 || i === points.length - 1 || moves.some((m) => m.stop === i)) return;
+        const d = distance(p.pos, at);
+        if (d < bestDist) {
+          best = i;
+          bestDist = d;
+        }
+      });
+      if (best > 0) moves.push({ stop: best, to: beforeTurnOff(r.path, r.path[retraceStart(r.path, st.at)]) });
+    });
     return { ...r, warnings: spurs.length ? spurs : turnsAround ? [UTURN_WARNING] : [], ...(moves.length ? { moves } : {}) };
   };
   const results = baseRoutes.map((r, i) => withWarnings(toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, [])));
@@ -659,28 +711,40 @@ export async function routeVia(
 
 /** How far a tapped or dragged pin may jump to reach a road. */
 const SNAP_REACH_M = 1000;
+/** A proper road this close wins over a nearer side street, cul-de-sac or driveway. */
+const THROUGH_ROAD_REACH_M = 300;
 
 /**
- * The nearest point on a rideable road to `p` (the route server's
- * locate), for pins the rider puts down by hand. Returns `p` unchanged if
- * there's no road within reach or the server doesn't answer quickly.
+ * Where a pin the rider taps or drags lands: a proper road (unclassified or
+ * better) if one is within THROUGH_ROAD_REACH_M, so the route doesn't ride
+ * up a cul-de-sac or driveway and back to reach it; otherwise the nearest
+ * rideable road. (Holding the map places a pin exactly, for a spot up a
+ * side road.) Returns `p` unchanged if there's no road within reach or the
+ * server doesn't answer quickly.
  */
 export async function snapToRoad(p: LatLng, opts: RouteOptions, signal?: AbortSignal): Promise<LatLng> {
   try {
     const timeout = AbortSignal.timeout(5000);
+    const at = { lat: p.lat, lon: p.lng };
     const res = await routerFetch(
       "/locate",
-      { locations: [{ lat: p.lat, lon: p.lng }], costing: costing(opts).costing, verbose: false },
+      { locations: [{ ...at, search_filter: { min_road_class: "unclassified" } }, at], costing: costing(opts).costing, verbose: false },
       signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeout]) : (signal ?? timeout),
     );
     if (!res.ok) return p;
-    const json = (await res.json()) as { edges?: { correlated_lat: number; correlated_lon: number }[] }[];
-    let best: LatLng | null = null;
-    for (const e of json?.[0]?.edges ?? []) {
-      const q = { lat: e.correlated_lat, lng: e.correlated_lon };
-      if (Number.isFinite(q.lat) && Number.isFinite(q.lng) && (!best || distance(p, q) < distance(p, best))) best = q;
-    }
-    return best && distance(p, best) <= SNAP_REACH_M ? best : p;
+    const json = (await res.json()) as ({ edges?: { correlated_lat: number; correlated_lon: number }[] } | null)[];
+    const nearest = (k: number) => {
+      let best: LatLng | null = null;
+      for (const e of json?.[k]?.edges ?? []) {
+        const q = { lat: e.correlated_lat, lng: e.correlated_lon };
+        if (Number.isFinite(q.lat) && Number.isFinite(q.lng) && (!best || distance(p, q) < distance(p, best))) best = q;
+      }
+      return best;
+    };
+    const through = nearest(0);
+    if (through && distance(p, through) <= THROUGH_ROAD_REACH_M) return through;
+    const any = nearest(1);
+    return any && distance(p, any) <= SNAP_REACH_M ? any : p;
   } catch (e) {
     if (signal?.aborted) throw e;
     return p;

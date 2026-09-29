@@ -105,7 +105,7 @@ function rememberRoutes(key: string, routes: RouteResult[]) {
 
 /** What the router is asked to ride through for these stops. */
 /** Rounds of moving a loop's points off dead ends before settling for what's left. */
-const MAX_DEAD_END_FIXES = 2;
+const MAX_DEAD_END_FIXES = 3;
 
 function planPoints(stops: Stop[], returnToStart: boolean): RoutePoint[] {
   const plan = routePoints(stops, returnToStart);
@@ -122,6 +122,7 @@ function planPoints(stops: Stop[], returnToStart: boolean): RoutePoint[] {
       // the rider's own pins may snap to a road within 75 m.
       radius: between ? (s.auto ? 1000 : 75) : undefined,
       movable: between && s.auto,
+      tapped: between && !s.auto && !!s.tapped,
     };
   });
 }
@@ -492,7 +493,8 @@ export default function App() {
                 return { ...s, ...moved, ...(s.shape ? { shape } : {}) };
               }),
             );
-            to.forEach((p, id) => labelStop(id, p));
+            // A name the rider gave stays; otherwise name the new spot.
+            to.forEach((p, id) => !stops.find((s) => s.id === id)?.named && labelStop(id, p));
             flash(moves.length === 1 ? "Kept the loop off a dead end" : `Kept the loop off ${moves.length} dead ends`);
             replanning = true;
             return;
@@ -598,7 +600,7 @@ export default function App() {
         options.returnToStart,
       );
     }
-    const stop: Stop = { id, position, label: label ?? "Locating…", ...(free ? { free: true } : {}) };
+    const stop: Stop = { id, position, label: label ?? "Locating…", ...(free ? { free: true } : label ? {} : { tapped: true }) };
     setStops((ss) => {
       const next = ss.slice();
       next.splice(at ?? ss.length, 0, stop);
@@ -648,7 +650,8 @@ export default function App() {
     // A name the rider gave stays; otherwise name the new spot.
     const stop = stops.find((s) => s.id === id);
     const named = stop?.named;
-    setStops((ss) => ss.map((s) => (s.id === id ? { ...s, position, auto: false, ...(named ? {} : { label: "Locating…" }) } : s)));
+    // Dragged: roughly here (it may move off a dead end), unless held in place.
+    setStops((ss) => ss.map((s) => (s.id === id ? { ...s, position, auto: false, tapped: !s.free, ...(named ? {} : { label: "Locating…" }) } : s)));
     // A pin placed by holding stays exactly where it's dropped.
     if (stop?.free) {
       if (!named) labelStop(id, position);
