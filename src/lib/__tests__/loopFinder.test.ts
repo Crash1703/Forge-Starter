@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { destination, distance, type LatLng } from "../geo";
-import { findLoops, moveOffDeadEnds, resized } from "../loopFinder";
+import { findLoops, moveOffDeadEnds, onRoads, resized } from "../loopFinder";
 import type { RouteResult } from "../routes";
 
 const home = { lat: -26.8, lng: 153.13 };
@@ -51,5 +51,29 @@ describe("tidying a loop", () => {
     expect(calls).toBe(2);
     expect(loops[0].deadEnds).toBe(0);
     expect(choices[0].label).toBe("Best balance");
+  });
+});
+
+describe("putting loop points on roads", () => {
+  it("moves points onto a nearby road, and pulls one in the sea towards the loop's middle", async () => {
+    const onLand = destination(home, 270, 20000);
+    const inSea = destination(home, 90, 20000);
+    const calls: LatLng[][] = [];
+    const locate = async (pts: LatLng[]) => {
+      calls.push(pts);
+      // Land is west of the start: a road 300 m north of any point there; nothing out east.
+      return pts.map((p) => (p.lng < home.lng + 0.1 ? destination(p, 0, 300) : null));
+    };
+    const [ring] = await onRoads([[onLand, inSea]], home, locate);
+    expect(distance(ring[0], destination(onLand, 0, 300))).toBeLessThan(1);
+    // Pulled in towards the middle (on land) and put on the road there.
+    expect(ring[1].lng).toBeLessThan(home.lng + 0.1);
+    expect(calls.length).toBeGreaterThan(1);
+    expect(calls[1]).toHaveLength(1); // only the point in the sea is asked about again
+  });
+
+  it("plans from the points as they are when the server doesn't answer", async () => {
+    const rings = [[destination(home, 90, 20000)]];
+    expect(await onRoads(rings, home, async (pts) => pts.map(() => null))).toBe(rings);
   });
 });

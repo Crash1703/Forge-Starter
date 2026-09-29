@@ -45,7 +45,7 @@ import {
   twistScore,
   type LatLng,
 } from "./lib/geo";
-import { defaultOptions, planRoute, planSections, quickPlan, snapToRoad, type RoutePoint, type RouteOptions, type RouteResult, type RouteStyle } from "./lib/routes";
+import { defaultOptions, planRoute, planSections, quickPlan, snapToRoad, throughRoadsNear, type RoutePoint, type RouteOptions, type RouteResult, type RouteStyle } from "./lib/routes";
 import { elevationProfile, type ElevationProfile } from "./lib/elevation";
 import { reverseGeocode } from "./lib/places";
 import { parseGpx, sampleStops, toGpx } from "./lib/gpx";
@@ -755,6 +755,7 @@ export default function App() {
           count,
           atOnce,
           plan: (ring) => quickPlan(planPoints(loopStops(origin, ring, [1, 3], -1, null), true), opts, ctrl.signal),
+          locate: (points) => throughRoadsNear(points, opts, ctrl.signal),
         },
         ctrl.signal,
       ));

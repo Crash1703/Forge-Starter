@@ -3,7 +3,7 @@
 import { test } from "vitest";
 import { distance, findSpurs, loopLayout, resample, type LatLng } from "../src/lib/geo";
 import { findLoops, type FoundLoop } from "../src/lib/loopFinder";
-import { defaultOptions, planRoute, quickPlan, type RouteOptions, type RoutePoint, type RouteResult } from "../src/lib/routes";
+import { defaultOptions, planRoute, quickPlan, throughRoadsNear, type RouteOptions, type RoutePoint, type RouteResult } from "../src/lib/routes";
 import { routePoints, type Stop } from "../src/lib/storage";
 
 function planPoints(stops: Stop[], returnToStart: boolean): RoutePoint[] {
@@ -48,6 +48,7 @@ async function scenario(name: string, home: LatLng, km: number, heading: number 
   const { choices, loops } = await findLoops({
     origin: home, targetMetres: km * 1000, heading, count: 6, atOnce: 2, random: () => 0.5,
     plan: (ring) => (requests++, quickPlan(planPoints(loopStops(origin, ring), true), opts)),
+    locate: (pts) => (requests++, throughRoadsNear(pts, opts)),
   });
   console.log(`${name}: ${requests} quick requests, ${((Date.now() - t0) / 1000).toFixed(0)} s`);
   for (const l of loops) report(`${name} quick h${l.heading.toFixed(0)} x${l.scale}`, l.route, home, { balance: Math.round(l.balance), curves: Math.round(l.curves), acc: Math.round(l.accuracy), overlap: +l.overlap.toFixed(2), deadEnds: +l.deadEnds.toFixed(2), cross: l.crossings });

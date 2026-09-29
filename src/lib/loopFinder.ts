@@ -10,6 +10,10 @@ const SPUR_TOLERANCE_M = 40;
 const BLAME_M = 3500;
 /** Loops tidied up after the first look (the best few, so it stays quick). */
 const REPAIR = 4;
+/** A loop point with a through road this close moves onto it. */
+const ON_ROAD_M = 1500;
+/** How far a point with no road near moves towards the loop's middle, each try. */
+const PULL = 0.35;
 
 /** A candidate loop together with the points it was planned through. */
 export interface FoundLoop extends ScoredLoop {
@@ -27,7 +31,47 @@ export interface FindLoopsInput {
   atOnce: number;
   /** A quick route round the loop through `ring` (null if there's none). */
   plan: (ring: LatLng[]) => Promise<RouteResult | null>;
+  /** The nearest through road to each point, or null (see throughRoadsNear). */
+  locate?: (points: LatLng[]) => Promise<(LatLng | null)[]>;
   random?: () => number;
+}
+
+/**
+ * Loop points put on proper roads before planning. Each point moves onto a
+ * through road nearby; one out in the sea or deep in a forest moves towards
+ * the loop's middle (twice at most) until there is one. Without this, such
+ * a point snaps to whatever road is nearest, often an island or peninsula
+ * road the loop then rides out and back along.
+ */
+export async function onRoads(
+  rings: LatLng[][],
+  origin: LatLng,
+  locate: (points: LatLng[]) => Promise<(LatLng | null)[]>,
+): Promise<LatLng[][]> {
+  const out = rings.map((r) => r.slice());
+  // The start and the ring points are evenly spaced round the circle, so their average is its middle.
+  const middles = rings.map((r) => {
+    const all = [origin, ...r];
+    return { lat: all.reduce((a, p) => a + p.lat, 0) / all.length, lng: all.reduce((a, p) => a + p.lng, 0) / all.length };
+  });
+  let pending = rings.flatMap((r, i) => r.map((_, k) => [i, k] as const));
+  for (let round = 0; round < 3 && pending.length; round++) {
+    const found = await locate(pending.map(([i, k]) => out[i][k]));
+    // No answer at all (offline, server busy): plan from the points as they are.
+    if (round === 0 && found.every((q) => !q)) return rings;
+    const next: (readonly [number, number])[] = [];
+    pending.forEach(([i, k], j) => {
+      const p = out[i][k];
+      const q = found[j];
+      if (q && distance(p, q) <= ON_ROAD_M) out[i][k] = q;
+      else if (round < 2) {
+        out[i][k] = { lat: p.lat + (middles[i].lat - p.lat) * PULL, lng: p.lng + (middles[i].lng - p.lng) * PULL };
+        next.push([i, k]);
+      }
+    });
+    pending = next;
+  }
+  return out;
 }
 
 /**
@@ -66,8 +110,8 @@ export function resized(ring: LatLng[], origin: LatLng, factor: number): LatLng[
 }
 
 /**
- * A new round trip: try several loop shapes with one quick request each,
- * tidy up the most promising (off dead ends, nearer the asked length), and
+ * A new round trip: put several loop shapes' points on proper roads, try
+ * each with one quick request, tidy up the most promising (off dead ends, nearer the asked length), and
  * offer the best balance, the curviest and one heading another way.
  */
 export async function findLoops(input: FindLoopsInput, signal?: AbortSignal): Promise<{ choices: LoopChoice[]; loops: FoundLoop[] }> {
@@ -78,8 +122,10 @@ export async function findLoops(input: FindLoopsInput, signal?: AbortSignal): Pr
   const inBatches = async <T>(items: T[], each: (item: T) => Promise<void>) => {
     for (let i = 0; i < items.length && !signal?.aborted; i += atOnce) await Promise.all(items.slice(i, i + atOnce).map(each));
   };
+  let rings = shapes.map((s) => roundTripWaypoints(origin, targetMetres * s.scale, s.heading, 5));
+  if (input.locate) rings = await onRoads(rings, origin, input.locate);
   await inBatches(shapes, async (s) => {
-    const ring = roundTripWaypoints(origin, targetMetres * s.scale, s.heading, 5);
+    const ring = rings[shapes.indexOf(s)];
     const r = await plan(ring);
     if (r) loops.push(score(s, ring, r));
   });
