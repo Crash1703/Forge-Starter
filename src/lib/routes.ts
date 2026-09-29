@@ -657,6 +657,45 @@ export async function snapToRoad(p: LatLng, opts: RouteOptions, signal?: AbortSi
 }
 
 /**
+ * For each point, the nearest spot on a proper through road (tertiary or
+ * better), or null if the server has none to offer (or doesn't answer).
+ * One request for many points, to check where a generated loop's points
+ * land: in the sea or deep in a forest, the nearest such road is far off.
+ */
+export async function throughRoadsNear(points: LatLng[], opts: RouteOptions, signal?: AbortSignal): Promise<(LatLng | null)[]> {
+  const out: (LatLng | null)[] = points.map(() => null);
+  // The public server caps locations per request.
+  for (let i = 0; i < points.length; i += 20) {
+    const chunk = points.slice(i, i + 20);
+    try {
+      const res = await routerFetch(
+        "/locate",
+        {
+          locations: chunk.map((p) => ({ lat: p.lat, lon: p.lng, search_filter: { min_road_class: "tertiary" } })),
+          costing: costing(opts).costing,
+          verbose: false,
+        },
+        signal,
+      );
+      if (!res.ok) continue;
+      const json = (await res.json()) as ({ edges?: { correlated_lat: number; correlated_lon: number }[] } | null)[];
+      chunk.forEach((p, k) => {
+        let best: LatLng | null = null;
+        for (const e of json?.[k]?.edges ?? []) {
+          const q = { lat: e.correlated_lat, lng: e.correlated_lon };
+          if (Number.isFinite(q.lat) && Number.isFinite(q.lng) && (!best || distance(p, q) < distance(p, best))) best = q;
+        }
+        out[i + k] = best;
+      });
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      // No answer: the loop is planned from the points as they are.
+    }
+  }
+  return out;
+}
+
+/**
  * Speed limits along a route, in km/h per path point (null where the map
  * has none), from Valhalla's trace_attributes on the route's own geometry.
  */

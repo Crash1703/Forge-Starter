@@ -1,4 +1,4 @@
-import { bendAnalysis, crossings, pathLength, sharedRoad, type LatLng } from "./geo";
+import { bendAnalysis, crossings, findSpurs, pathLength, sharedRoad, type LatLng } from "./geo";
 import type { RouteResult } from "./routes";
 
 /** A loop shape to try: which way it heads and how big it is (1 = the asked length). */
@@ -15,6 +15,8 @@ export interface ScoredLoop extends LoopShape {
   accuracy: number;
   /** Share of the loop ridden twice (the way home on the way out's road), 0–1. */
   overlap: number;
+  /** Share of the loop spent riding up dead ends and back, 0–1. */
+  deadEnds: number;
   crossings: number;
   /** Overall, for "Best balance". */
   balance: number;
@@ -40,16 +42,17 @@ export function loopShapes(count: number, heading: number | null, random = Math.
 
 const clamp = (v: number) => Math.min(100, Math.max(0, v));
 
-/** How good a candidate loop is: bends, length, and no riding the same road twice or crossing over. */
+/** How good a candidate loop is: bends, length, and no riding the same road twice (home, or up a dead end) or crossing over. */
 export function scoreLoop(shape: LoopShape, route: RouteResult, targetMetres: number, origin: LatLng, stops: LatLng[]): ScoredLoop {
   const curves = bendAnalysis(route.path).score;
   const accuracy = clamp(100 * (1 - Math.abs(route.distance - targetMetres) / targetMetres / 0.3));
   const half = Math.floor(route.path.length / 2);
   const total = Math.max(1, pathLength(route.path));
   const overlap = Math.min(1, sharedRoad(route.path.slice(half), [route.path.slice(0, half + 1)], [origin]) / total);
+  const deadEnds = Math.min(1, findSpurs(route.path, 300, 40).reduce((a, s) => a + 2 * s.length, 0) / total);
   const cross = crossings(route.path, null, stops).length;
-  const balance = 0.55 * curves + 0.45 * accuracy - overlap * 150 - cross * 12;
-  return { ...shape, route, curves, accuracy, overlap, crossings: cross, balance };
+  const balance = 0.55 * curves + 0.45 * accuracy - (overlap + deadEnds) * 150 - cross * 12;
+  return { heading: shape.heading, scale: shape.scale, route, curves, accuracy, overlap, deadEnds, crossings: cross, balance };
 }
 
 export interface LoopChoice {
@@ -75,7 +78,7 @@ export function pickLoops(scored: ScoredLoop[]): LoopChoice[] {
   const best = byBalance[0];
   const out: LoopChoice[] = [{ label: "Best balance", loop: best }];
   const curvy = [...scored]
-    .filter((s) => s !== best && s.accuracy >= 30 && s.overlap < 0.25)
+    .filter((s) => s !== best && s.accuracy >= 30 && s.overlap + s.deadEnds < 0.25)
     .sort((a, b) => b.curves - 0.5 * b.crossings * 12 - (a.curves - 0.5 * a.crossings * 12))[0];
   if (curvy && curvy.curves > best.curves) out.push({ label: "Most curvy", loop: curvy });
   const taken = out.map((c) => c.loop);

@@ -50,10 +50,10 @@ describe("scoring and picking loops", () => {
 
   it("offers three different loops: best balance, most curvy, another way", () => {
     const scored: ScoredLoop[] = [
-      { ...shape(0), route: circleRoute(100, 0), curves: 40, accuracy: 100, overlap: 0, crossings: 0, balance: 67 },
-      { ...shape(20), route: circleRoute(100, 20), curves: 80, accuracy: 60, overlap: 0.05, crossings: 0, balance: 63 },
-      { ...shape(10), route: circleRoute(100, 10), curves: 35, accuracy: 95, overlap: 0, crossings: 0, balance: 62 },
-      { ...shape(180), route: circleRoute(100, 180), curves: 30, accuracy: 90, overlap: 0, crossings: 0, balance: 57 },
+      { ...shape(0), route: circleRoute(100, 0), curves: 40, accuracy: 100, overlap: 0, deadEnds: 0, crossings: 0, balance: 67 },
+      { ...shape(20), route: circleRoute(100, 20), curves: 80, accuracy: 60, overlap: 0.05, deadEnds: 0, crossings: 0, balance: 63 },
+      { ...shape(10), route: circleRoute(100, 10), curves: 35, accuracy: 95, overlap: 0, deadEnds: 0, crossings: 0, balance: 62 },
+      { ...shape(180), route: circleRoute(100, 180), curves: 30, accuracy: 90, overlap: 0, deadEnds: 0, crossings: 0, balance: 57 },
     ];
     const picked = pickLoops(scored);
     expect(picked.map((c) => c.label)).toEqual(["Best balance", "Most curvy", "Another way"]);
@@ -62,8 +62,8 @@ describe("scoring and picking loops", () => {
 
   it("doesn't offer a 'most curvy' that isn't curvier, or one far off the length", () => {
     const scored: ScoredLoop[] = [
-      { ...shape(0), route: circleRoute(100, 0), curves: 70, accuracy: 100, overlap: 0, crossings: 0, balance: 80 },
-      { ...shape(90), route: circleRoute(100, 90), curves: 95, accuracy: 10, overlap: 0, crossings: 0, balance: 50 },
+      { ...shape(0), route: circleRoute(100, 0), curves: 70, accuracy: 100, overlap: 0, deadEnds: 0, crossings: 0, balance: 80 },
+      { ...shape(90), route: circleRoute(100, 90), curves: 95, accuracy: 10, overlap: 0, deadEnds: 0, crossings: 0, balance: 50 },
     ];
     const picked = pickLoops(scored);
     expect(picked.map((c) => c.label)).toEqual(["Best balance", "Another way"]);
