@@ -104,6 +104,9 @@ function rememberRoutes(key: string, routes: RouteResult[]) {
 }
 
 /** What the router is asked to ride through for these stops. */
+/** Rounds of moving a loop's points off dead ends before settling for what's left. */
+const MAX_DEAD_END_FIXES = 2;
+
 function planPoints(stops: Stop[], returnToStart: boolean): RoutePoint[] {
   const plan = routePoints(stops, returnToStart);
   // No turning back at stops on a loop (or at generated loop points), so
@@ -423,6 +426,8 @@ export default function App() {
   const stopsKey = keyOfStops(stops);
   /** Stops that moved onto the road their route already uses: no need to plan again. */
   const alreadyPlanned = useRef<string | null>(null);
+  /** Rounds of moving generated points off dead ends since the last plan that needed none. */
+  const deadEndFixes = useRef(0);
   useEffect(() => {
     if (stops.length < 2) {
       setRoutes([]);
@@ -469,18 +474,21 @@ export default function App() {
       (styles.some(Boolean) ? planSections(points, styles, options, ctrl.signal) : planRoute(points, options, ctrl.signal))
         .then((r) => {
           // A generated loop point the route has to ride up a dead end to
-          // reach: move it to the foot of that road and plan again. Moved
-          // points count as placed, so this happens once per point.
+          // reach: move it to the foot of that road and plan again. The
+          // points stay the app's, so a later change (another ride style
+          // reaches them differently) can move them again; a few rounds per
+          // change at most, so it can never go round in circles.
           const moves = r[0]?.moves ?? [];
-          if (moves.length) {
-            // A pin moves to the foot of the dead end; a shaping point that
-            // led there is simply dropped.
+          if (moves.length && deadEndFixes.current < MAX_DEAD_END_FIXES) {
+            deadEndFixes.current++;
+            // A pin moves to just before the dead end's turn-off; a shaping
+            // point that led there is simply dropped.
             const to = new Map(moves.filter((m) => plan[m.stop].shape < 0).map((m) => [plan[m.stop].stop.id, m.to]));
             const drop = new Set(moves.filter((m) => plan[m.stop].shape >= 0).map((m) => `${plan[m.stop].stop.id}/${plan[m.stop].shape}`));
             setStops((ss) =>
               ss.map((s) => {
                 const shape = s.shape?.filter((_, k) => !drop.has(`${s.id}/${k}`));
-                const moved = to.has(s.id) ? { position: to.get(s.id)!, auto: false } : {};
+                const moved = to.has(s.id) ? { position: to.get(s.id)! } : {};
                 return { ...s, ...moved, ...(s.shape ? { shape } : {}) };
               }),
             );
@@ -489,6 +497,7 @@ export default function App() {
             replanning = true;
             return;
           }
+          deadEndFixes.current = 0;
           rememberRoutes(key, r);
           show(r);
           // Pins the app placed (loops, round trips) go where the route
@@ -505,6 +514,7 @@ export default function App() {
           }
         })
         .catch((e: Error) => {
+          deadEndFixes.current = 0;
           if (e.name !== "AbortError") setError(e.message);
         })
         .finally(() => !ctrl.signal.aborted && !replanning && setBusy(false));

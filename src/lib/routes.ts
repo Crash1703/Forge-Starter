@@ -413,6 +413,32 @@ async function uncrossLoop(
   return { summary: { length: sum((l) => l.summary.length), time: sum((l) => l.summary.time) }, legs };
 }
 
+/** Out and back counts as the same road within this many metres (either side of a divided road). */
+const SPUR_TOLERANCE_M = 40;
+/** How far back along the route from a dead end's turn-off a moved point goes. */
+const BEFORE_TURN_OFF_M = 50;
+
+/**
+ * A point on `path` a little before it reaches `turnOff` (the foot of a
+ * dead end): on the through road, clear of the junction, so a point moved
+ * there can't snap back onto the dead end itself.
+ */
+function beforeTurnOff(path: LatLng[], turnOff: LatLng): LatLng {
+  let at = 0;
+  for (let i = 1; i < path.length; i++) if (distance(path[i], turnOff) < distance(path[at], turnOff)) at = i;
+  // Walk back along the route from there, BEFORE_TURN_OFF_M in all.
+  let left = BEFORE_TURN_OFF_M + distance(path[at], turnOff);
+  for (let i = at; i > 0; i--) {
+    const d = distance(path[i], path[i - 1]);
+    if (d >= left) {
+      const f = left / d;
+      return { lat: path[i].lat + (path[i - 1].lat - path[i].lat) * f, lng: path[i].lng + (path[i - 1].lng - path[i].lng) * f };
+    }
+    left -= d;
+  }
+  return turnOff;
+}
+
 /** Where the route actually reached stop `n` (its road, which may be some way from the pin). */
 function reachedStop(r: RouteResult, n: number): LatLng | null {
   const step = r.steps.find((st) => st.type === STOP_TYPE && st.instruction === `Stop ${n}`);
@@ -518,7 +544,8 @@ export async function planRoute(
     // Each dead end the route rides up and back, blamed on the generated
     // point that led it there: the one it reached nearest the spur's tip.
     const moves: { stop: number; to: LatLng }[] = [];
-    for (const spur of findSpurs(r.path, SPUR_METRES)) {
+    // 40 m: the two passes of a dead end can sit on either side of a divided road.
+    for (const spur of findSpurs(r.path, SPUR_METRES, SPUR_TOLERANCE_M)) {
       let best = -1;
       let bestDist = MOVE_REACH;
       points.forEach((p, i) => {
@@ -530,7 +557,7 @@ export async function planRoute(
           bestDist = d;
         }
       });
-      if (best > 0) moves.push({ stop: best, to: spur.base });
+      if (best > 0) moves.push({ stop: best, to: beforeTurnOff(r.path, spur.base) });
     }
     return { ...r, warnings: spurs.length ? spurs : turnsAround ? [UTURN_WARNING] : [], ...(moves.length ? { moves } : {}) };
   };
