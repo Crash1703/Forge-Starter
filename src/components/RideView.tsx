@@ -8,7 +8,17 @@ import type { RideLayer } from "./MapView";
 import { distance, formatDistance, formatDuration, formatTime, speedUnit, toSpeed, type LatLng } from "../lib/geo";
 import { Announcer, maneuverKind, Navigator, spliceRejoin, type Fix, type NavRoute, type NavState } from "../lib/navigation";
 import { routeBack, routeVia, speedLimits, type RouteOptions, type RouteResult } from "../lib/routes";
-import { askToShowRideNotification, keepScreenOn, simulateRide, speak, subscribeGps, type Stop } from "../lib/device";
+import {
+  askToShowRideNotification,
+  clearNextTurn,
+  keepScreenOn,
+  showNextTurn,
+  showOverLockScreen,
+  simulateRide,
+  speak,
+  subscribeGps,
+  type Stop,
+} from "../lib/device";
 
 interface Props {
   route: RouteResult;
@@ -143,6 +153,8 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
 
     (async () => {
       if (!simulate) await askToShowRideNotification();
+      // Waking the phone mid-ride shows the ride, not the lock screen.
+      if (!simulate) void showOverLockScreen(true);
       letSleep = energySaving ? () => undefined : await keepScreenOn().catch(() => () => undefined);
       letSleepRef.current = letSleep;
       stopGps = simulate
@@ -156,6 +168,10 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
       letSleep();
       letSleepRef.current();
       onLayer(null);
+      if (!simulate) {
+        void showOverLockScreen(false);
+        void clearNextTurn();
+      }
     };
     // One ride per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -238,6 +254,21 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
   const limit = state ? (limits.current[n.indexAt(state.along)] ?? null) : null;
   const over = limit != null && speedKmh != null && speedKmh > limit + 3;
   const eta = state ? new Date(Date.now() + state.remainingTime * 1000) : null;
+
+  // The next turn on the lock screen (a silent notification), kept up to date.
+  const turnTitle = paused
+    ? "Ride paused"
+    : state?.arrived
+      ? endsHome
+        ? "Back home"
+        : "Arrived"
+      : state && next
+        ? `${formatDistance(state.toNext)} · ${next.street ? `${next.exit ? `Exit ${next.exit} · ` : ""}${next.street}` : next.instruction}`
+        : "Starting your ride…";
+  const turnBody = state && !state.arrived ? `${formatDistance(state.remaining)} to go · arrive ${eta ? formatTime(eta) : "–"}` : "Ride Forge";
+  useEffect(() => {
+    if (!simulate) void showNextTurn(turnTitle, turnBody);
+  }, [simulate, turnTitle, turnBody]);
 
   return (
     <div className="ride" role="region" aria-label="Ride mode">

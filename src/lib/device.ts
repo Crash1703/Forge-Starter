@@ -161,6 +161,71 @@ export async function keepScreenOn(): Promise<Stop> {
 }
 
 /**
+ * In the app, show the ride screen over the lock screen while riding (as
+ * Google Maps does): waking the phone shows the ride straight away, no
+ * unlocking. Off again when the ride ends. Nothing to do on the website.
+ */
+export async function showOverLockScreen(on: boolean): Promise<void> {
+  if (!isApp) return;
+  try {
+    const { registerPlugin } = await import("@capacitor/core");
+    const lock = registerPlugin<{ set(o: { on: boolean }): Promise<void> }>("LockScreen");
+    await lock.set({ on });
+  } catch {
+    /* an older app build without the plugin: the ride still works */
+  }
+}
+
+/** The lock-screen "next turn" notification. */
+const TURN_ID = 7314;
+const TURN_CHANNEL = "ride-next-turn";
+let turnChannel: Promise<void> | null = null;
+let turnShown = { title: "", body: "", at: 0 };
+
+/**
+ * Show the next turn in a silent notification that sits on the lock screen
+ * (and in the notification shade) during a ride, updated as it changes: a
+ * new instruction straight away, the distance at most every 5 seconds.
+ */
+export async function showNextTurn(title: string, body: string): Promise<void> {
+  if (!isApp) return;
+  const now = Date.now();
+  if (title === turnShown.title && (body === turnShown.body || now - turnShown.at < 5000)) return;
+  turnShown = { title, body, at: now };
+  try {
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    // Low importance: no sound or buzz (the voice does the talking); public: readable while locked.
+    turnChannel ??= LocalNotifications.createChannel({
+      id: TURN_CHANNEL,
+      name: "Next turn",
+      description: "The next turn while riding, on the lock screen",
+      importance: 2,
+      visibility: 1,
+      vibration: false,
+      lights: false,
+    }).catch(() => undefined);
+    await turnChannel;
+    await LocalNotifications.schedule({
+      notifications: [{ id: TURN_ID, title, body, channelId: TURN_CHANNEL, ongoing: true, autoCancel: false }],
+    });
+  } catch {
+    /* notifications not allowed: the ride screen still shows it */
+  }
+}
+
+/** Take the next-turn notification away (ride over). */
+export async function clearNextTurn(): Promise<void> {
+  turnShown = { title: "", body: "", at: 0 };
+  if (!isApp) return;
+  try {
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    await LocalNotifications.cancel({ notifications: [{ id: TURN_ID }] });
+  } catch {
+    /* nothing showing */
+  }
+}
+
+/**
  * Android 13+ hides the "navigating" notification (the one that keeps GPS
  * running with the screen locked) until the app may post notifications.
  * Ask once, when the first ride starts; riding works either way.
