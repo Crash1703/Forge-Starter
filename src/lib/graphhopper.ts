@@ -185,17 +185,20 @@ const pointKey = (p: { lat: number; lng: number }) => `${p.lat.toFixed(6)},${p.l
  */
 export function roadsOf(path: GhPath, decode: (s: string) => LatLng[]): [string, Road][] {
   const pts = decode(path.points);
-  return pts.slice(0, -1).map((p, i) => [pointKey(p), roadAt(path.details, i)]);
+  // The last point too (with the road into it): where legs from separate
+  // requests join, a route's path keeps the end of one leg.
+  return pts.map((p, i) => [pointKey(p), roadAt(path.details, Math.min(i, pts.length - 2))]);
 }
 
 /** Valhalla's edges for a path whose every point is known (see roadsOf), or null if any isn't. */
 export function edgesFromKnown(shape: { lat: number; lon: number }[], known: (key: string) => Road | undefined) {
-  const roads: Road[] = [];
-  for (let i = 0; i < shape.length - 1; i++) {
-    const r = known(pointKey({ lat: shape[i].lat, lng: shape[i].lon }));
-    if (!r) return null;
-    roads.push(r);
-  }
+  const found = shape.slice(0, -1).map((p) => known(pointKey({ lat: p.lat, lng: p.lon })));
+  const missing = found.filter((r) => !r).length;
+  // A stray point or two (a join between legs) borrows the road beside it;
+  // a path it mostly doesn't know was planned elsewhere.
+  if (!found.length || missing > Math.max(2, found.length / 100) || missing * 2 >= found.length) return null;
+  let last = found.find((r) => r)!;
+  const roads = found.map((r) => (last = r ?? last));
   return mergeEdges(shape.map((p) => ({ lat: p.lat, lng: p.lon })), roads, (i) => i);
 }
 

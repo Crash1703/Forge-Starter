@@ -1,6 +1,6 @@
 import { avoidPoints, centroid, crossings, curviness, distance, findSpurs, midpointOffset, outAndBack, sharedRoad, type LatLng } from "./geo";
 import { decodePolyline } from "./polyline";
-import { requestsAtOnce, routerFetch } from "./routeServer";
+import { requestsAtOnce, routerFetch, routerKnowsStyle } from "./routeServer";
 
 export type RouteStyle = "fastest" | "scenic" | "twisty";
 export type Vehicle = "motorcycle" | "car";
@@ -536,7 +536,9 @@ export async function planRoute(
   };
   const results = baseRoutes.map((r, i) => withWarnings(toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, [])));
 
-  if (opts.style === "twisty" && stops.length < MAX_STOPS) {
+  // Valhalla doesn't know twisty roads from straight ones, so try detours
+  // for them; a GraphHopper server already chose its roads by the style.
+  if (opts.style === "twisty" && stops.length < MAX_STOPS && !routerKnowsStyle()) {
     // Longest straight-line leg is where a detour has the most room to find better roads.
     let leg = 0;
     for (let i = 1; i < stops.length - 1; i++) {

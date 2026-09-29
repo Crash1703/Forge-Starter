@@ -27,10 +27,20 @@ export function normaliseServer(url: string): string {
 export function setRouteServer(url: string) {
   own = normaliseServer(url);
   ownKind = null;
+  graphHopper = false;
 }
 
+/** Whether the rider's GraphHopper server is answering (known once it has been asked). */
+let graphHopper = false;
+
 /** Requests the server can take at once: the public one refuses bursts, the rider's own doesn't mind. */
-export const requestsAtOnce = () => (own ? 4 : 2);
+export const requestsAtOnce = () => (own ? (graphHopper ? 6 : 4) : 2);
+
+/**
+ * Whether the router itself chooses roads by the ride style (the rider's
+ * GraphHopper server does; Valhalla doesn't, so the app tries detours).
+ */
+export const routerKnowsStyle = () => !!own && graphHopper;
 
 /** GraphHopper answers /info with its profiles; Valhalla doesn't have one. */
 async function kindOf(base: string, signal?: AbortSignal): Promise<"valhalla" | "graphhopper"> {
@@ -117,10 +127,13 @@ export async function routerFetch(path: string, body: unknown, signal?: AbortSig
   if (own) {
     try {
       const base = own;
-      ownKind ??= kindOf(base, signal).catch((e) => {
-        ownKind = null;
-        throw e;
-      });
+      ownKind ??= kindOf(base, signal).then(
+        (kind) => ((graphHopper = kind === "graphhopper"), kind),
+        (e) => {
+          ownKind = null;
+          throw e;
+        },
+      );
       const res =
         (await ownKind) === "graphhopper"
           ? await askGraphHopper(base, path, body, withTimeout(signal, OWN_TIMEOUT_MS * 3))
