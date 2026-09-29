@@ -92,7 +92,8 @@ export function resample(path: LatLng[], step: number): LatLng[] {
 }
 
 /**
- * Curviness in degrees of heading change per km. Straight motorway ≈ 0-20,
+ * Curviness in degrees of heading change per km, not counting turns at
+ * junctions and street corners. Straight motorway ≈ 0-20,
  * rural roads ≈ 40-100, alpine passes and twisty back roads 150+.
  */
 export function curviness(path: LatLng[]): number {
@@ -108,7 +109,8 @@ export function curviness(path: LatLng[]): number {
     total += Math.min(Math.abs(turnAngle(prev, cur)), 120);
     prev = cur;
   }
-  return total / km;
+  // Turning at junctions and street corners isn't twisty road.
+  return Math.max(0, total - bendAnalysis(path).junctionDegrees) / km;
 }
 
 export type CurvinessLabel = "Straight" | "Gentle" | "Curvy" | "Twisty" | "Very twisty";
@@ -390,41 +392,111 @@ export function crossings(a: LatLng[], b: LatLng[] | null, ignore: LatLng[] = []
 /** A 0–10 twistiness score from degrees of turning per km (the "Calimeter" idea). */
 export const twistScore = (curvinessDegPerKm: number) => Math.min(10, Math.max(0, curvinessDegPerKm / 20));
 
+/** What the bends on a road are like (see bendAnalysis). */
+export interface BendReport {
+  /** Real bends: flowing curves, sweepers and hairpins. */
+  bends: number;
+  /** Sharp corners with straight road either side: junctions and town streets, not bends. */
+  junctions: number;
+  /** Degrees of turning at those junction corners. */
+  junctionDegrees: number;
+  /** 0–100: how much good bend riding there is per km (fewer, gentler bends score lower). */
+  score: number;
+}
+
+const BEND_STEP = 25;
+
 /**
- * Number of real bends: runs of turning in one direction that add up to at
- * least `minTurn` degrees. Small wobbles don't end a bend, a long straight
- * does, and a change of direction starts a new one (an S-bend counts twice).
+ * Find the bends on a path and tell flowing road apart from street corners.
+ *
+ * The path is resampled every 25 m and the heading change at each point
+ * measured. A bend is a run of turning one way that adds up to at least
+ * `minTurn` degrees (small wobbles don't end it, ~200 m of straight or a
+ * change of direction does). Its radius comes from its length and angle.
+ *
+ * A turn of 70–110° done within ~50 m, with 100 m or more of straight road
+ * before and after, is a junction: a right turn at a crossroads or a
+ * suburban street corner. It counts as turning, not as a bend. Everything
+ * else is a bend, weighted by how good it is to ride: 30–250 m radius is the
+ * sweet spot, hairpins count nearly as much, long sweepers less, and very
+ * gentle curves little.
  */
-export function countBends(path: LatLng[], minTurn = 30): number {
-  const step = 25;
-  const pts = resample(path, step);
-  if (pts.length < 3) return 0;
-  let bends = 0;
-  let sum = 0; // signed degrees in the current bend
-  let calm = 0; // consecutive near-straight samples
-  const close = () => {
-    if (Math.abs(sum) >= minTurn) bends++;
-    sum = 0;
-  };
+export function bendAnalysis(path: LatLng[], minTurn = 30): BendReport {
+  const pts = resample(path, BEND_STEP);
+  const empty = { bends: 0, junctions: 0, junctionDegrees: 0, score: 0 };
+  if (pts.length < 3) return empty;
+  const turns: number[] = [];
   let prev = bearing(pts[0], pts[1]);
   for (let i = 2; i < pts.length; i++) {
     const cur = bearing(pts[i - 1], pts[i]);
-    const t = turnAngle(prev, cur);
+    turns.push(turnAngle(prev, cur));
     prev = cur;
+  }
+  // Group turning into bends: [first sample, last sample, signed degrees].
+  const runs: [number, number, number][] = [];
+  let start = -1;
+  let last = -1;
+  let sum = 0;
+  let calm = 0;
+  const close = () => {
+    if (start >= 0 && Math.abs(sum) >= minTurn) runs.push([start, last, sum]);
+    start = -1;
+    sum = 0;
+  };
+  turns.forEach((t, i) => {
     if (Math.abs(t) > 120) {
-      close(); // a U-turn or junction, not a bend
-      continue;
+      close(); // a U-turn or roundabout, not a bend
+      return;
     }
     if (Math.abs(t) < 2) {
-      if (++calm >= 8) close(); // ~200 m of straight ends the bend
-      continue;
+      if (++calm >= 8) close();
+      return;
     }
     calm = 0;
-    if (sum !== 0 && Math.sign(t) !== Math.sign(sum)) close();
+    if (start >= 0 && Math.sign(t) !== Math.sign(sum)) close();
+    if (start < 0) start = i;
+    last = i;
     sum += t;
-  }
+  });
   close();
-  return bends;
+
+  const straightBefore = (i: number) => {
+    let n = 0;
+    while (i - 1 - n >= 0 && Math.abs(turns[i - 1 - n]) < 3) n++;
+    return n * BEND_STEP;
+  };
+  const straightAfter = (i: number) => {
+    let n = 0;
+    while (i + 1 + n < turns.length && Math.abs(turns[i + 1 + n]) < 3) n++;
+    return n * BEND_STEP;
+  };
+  let bends = 0;
+  let junctions = 0;
+  let junctionDegrees = 0;
+  let weighted = 0;
+  for (const [a, b, deg] of runs) {
+    const angle = Math.abs(deg);
+    const length = (b - a + 1) * BEND_STEP;
+    const radius = length / rad(angle);
+    if (angle >= 70 && angle <= 110 && length <= 50 && straightBefore(a) >= 100 && straightAfter(b) >= 100) {
+      junctions++;
+      junctionDegrees += angle;
+      continue;
+    }
+    bends++;
+    weighted += radius < 30 ? 0.8 : radius <= 250 ? 1 : radius <= 600 ? 0.6 : 0.3;
+  }
+  const km = pathLength(pts) / 1000;
+  const score = km > 0.2 ? Math.round(100 * (1 - Math.exp(-weighted / km / 2.5))) : 0;
+  return { bends, junctions, junctionDegrees, score };
+}
+
+/**
+ * Number of real bends (see bendAnalysis): street corners at junctions
+ * don't count, and an S-bend counts twice.
+ */
+export function countBends(path: LatLng[], minTurn = 30): number {
+  return bendAnalysis(path, minTurn).bends;
 }
 
 export type TwistLevel = 0 | 1 | 2 | 3;

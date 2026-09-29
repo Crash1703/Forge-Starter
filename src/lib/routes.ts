@@ -16,6 +16,11 @@ export interface RouteOptions {
    * the rider turns it off (routes saved before it existed count as on).
    */
   avoidUnpaved?: boolean;
+  /**
+   * Direct (0) to Adventure (1): how far a route may stray from the
+   * quickest for better roads. 0.5 when not set.
+   */
+  detour?: number;
   /** Ride back to the first stop after the last one. */
   returnToStart: boolean;
 }
@@ -27,8 +32,18 @@ export const defaultOptions: RouteOptions = {
   avoidTolls: false,
   avoidFerries: false,
   avoidUnpaved: true,
+  detour: 0.5,
   returnToStart: false,
 };
+
+/** The Direct–Adventure setting, 0..1 (0.5 when not set). */
+export const detourLevel = (opts: RouteOptions) => Math.min(1, Math.max(0, opts.detour ?? 0.5));
+
+/**
+ * How much slower than the quickest option a route may be: 1.15× at Direct,
+ * 1.6× in the middle (as before the setting), 2.05× at Adventure.
+ */
+export const slowestAllowed = (opts: RouteOptions) => 1.15 + 0.9 * detourLevel(opts);
 
 export interface Step {
   instruction: string;
@@ -403,6 +418,25 @@ function reachedStop(r: RouteResult, n: number): LatLng | null {
 }
 
 /**
+ * One quick look at a route through `points`: a single request, none of the
+ * loop clean-up or twisty detours. For comparing candidate loops before
+ * planning the chosen one properly. Null if there's no route.
+ */
+export async function quickPlan(points: RoutePoint[], opts: RouteOptions, signal?: AbortSignal): Promise<RouteResult | null> {
+  const base: Waypoint[] = points.map((p, i) => ({ ...p, via: !!p.via && i > 0 && i < points.length - 1 }));
+  for (const pts of [base, base.map((p) => ({ ...p, noUturn: false }))]) {
+    try {
+      const [trip] = await computeRoutes(pts, opts, false, signal);
+      return toResult(trip, "", []);
+    } catch (e) {
+      if ((e as Error).name === "AbortError") throw e;
+      // A point at the end of a dead end: try once more allowing a U-turn.
+    }
+  }
+  return null;
+}
+
+/**
  * Plan a route through `points`, in order.
  *
  * For the twisty style we ask for several candidate routes (the router's
@@ -511,8 +545,10 @@ export async function planRoute(
     if (distance(a, b) > 5000) {
       const middle = midpointOffset(a, b, 0);
       // On a loop, a detour into the middle would make it cross itself.
+      // Adventure pushes the detour points further out; Direct keeps them close.
+      const reach = 0.5 + detourLevel(opts);
       const variants = [0.2, -0.2, 0.35, -0.35]
-        .map((f) => midpointOffset(a, b, f))
+        .map((f) => midpointOffset(a, b, f * reach))
         .filter((p) => !centre || distance(p, centre) > distance(middle, centre));
       const tryDetour = async (detour: LatLng): Promise<RouteResult | null> => {
         const pts = [...base.slice(0, leg + 1), { pos: detour, via: true, radius: HELPER_RADIUS }, ...base.slice(leg + 1)];
@@ -740,7 +776,7 @@ function rank(results: RouteResult[], points: RoutePoint[], opts: RouteOptions):
   const quickest = Math.min(...results.map((r) => r.duration));
   const unique = results.filter(
     (r, i) =>
-      r.duration <= quickest * 1.6 &&
+      r.duration <= quickest * slowestAllowed(opts) &&
       !results.slice(0, i).some((o) => Math.abs(o.distance - r.distance) < r.distance * 0.01),
   );
   // A loop that crosses over itself rides a figure of eight; rank clean loops first.

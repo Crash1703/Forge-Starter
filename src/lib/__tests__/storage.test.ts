@@ -16,6 +16,12 @@ describe("share links", () => {
     expect(decodeShare(encodeShare(stops, { ...opts, avoidUnpaved: false }))!.options.avoidUnpaved).toBe(false);
     // Links from before the dirt-road option keep off dirt.
     expect(decodeShare("#r=scenic.motorcycle.0000~1,2,a~3,4,b")!.options.avoidUnpaved).toBe(true);
+    // Direct–Adventure rides along only when it isn't the middle.
+    expect(encodeShare(stops, opts)).not.toMatch(/\.d\d/);
+    const adventure = encodeShare(stops, { ...opts, detour: 0.9 });
+    expect(adventure).toMatch(/^#r=twisty\.motorcycle\.\d+\.d90~/);
+    expect(decodeShare(adventure)!.options.detour).toBe(0.9);
+    expect(decodeShare("#r=scenic.motorcycle.0000~1,2,a~3,4,b")!.options.detour).toBe(0.5);
   });
 
   it("ignores unrelated hashes", () => {

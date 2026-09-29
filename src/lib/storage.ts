@@ -131,14 +131,17 @@ export function encodeShare(stops: Stop[], o: RouteOptions): string {
     const extra = shape ? `,${s.legStyle ? STYLE_CODE[s.legStyle] : ""},${shape}` : s.legStyle ? `,${STYLE_CODE[s.legStyle]}` : "";
     return `${s.position.lat.toFixed(5)},${s.position.lng.toFixed(5)},${enc(s.label)}${extra}`;
   });
-  return `#r=${[`${o.style}.${o.vehicle}.${flags}`, ...pts].join("~")}`;
+  // The Direct–Adventure setting as a 4th part ("d50"), only when it isn't the middle.
+  const detour = o.detour != null && Math.round(o.detour * 100) !== 50 ? `.d${Math.round(o.detour * 100)}` : "";
+  return `#r=${[`${o.style}.${o.vehicle}.${flags}${detour}`, ...pts].join("~")}`;
 }
 
 export function decodeShare(hash: string): { stops: Stop[]; options: RouteOptions } | null {
   const m = /^#r=(.+)$/.exec(hash);
   if (!m) return null;
   const [head, ...pts] = m[1].split("~");
-  const [style, vehicle, flags = "000"] = head.split(".");
+  const [style, vehicle, flags = "000", detourPart] = head.split(".");
+  const detour = /^d(\d{1,3})$/.exec(detourPart ?? "");
   const stops = pts.flatMap((p) => {
     const [lat, lng, label = "", code = "", shapeText = ""] = p.split(",");
     const position = { lat: parseFloat(lat), lng: parseFloat(lng) };
@@ -168,6 +171,7 @@ export function decodeShare(hash: string): { stops: Stop[]; options: RouteOption
     avoidFerries: flags[2] === "1",
     returnToStart: flags[3] === "1",
     avoidUnpaved: flags[4] !== "1",
+    detour: detour ? Math.min(100, +detour[1]) / 100 : 0.5,
   };
   return normalizeLoop(stops, options);
 }

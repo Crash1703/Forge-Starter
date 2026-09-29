@@ -52,13 +52,6 @@ const PATHS = {
   star: "M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9L12 3z",
   check: "M5 12l5 5 9-10",
   stop: "M6 6h12v12H6z",
-  user: "M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM4 21a8 8 0 0 1 16 0",
-  list: "M4 5h16v4H4zM4 10.5h16v4H4zM4 16h16v4H4z",
-  calendar: "M4 6h16v15H4zM4 10h16M8 3v5M16 3v5M13 14h4v4h-4z",
-  checkCircle: "M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM8 12l3 3 5-6",
-  bike: "M5.5 13a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM18.5 13a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM5.5 16.5 9 10h6l3.5 6.5M9 10 7.5 7H5M15 10l1.5-3H19M12 16.5 15 10",
-  helmet: "M4 17a8 8 0 1 1 16 0v2H4v-2zM11 11.5h9.2M11 11.5a2.5 2.5 0 0 0 0 5h9",
-  chevronLeft: "M15 6l-6 6 6 6",
 } as const;
 
 export type IconName = keyof typeof PATHS;

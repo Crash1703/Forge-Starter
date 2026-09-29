@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Map as MapLibre } from "maplibre-gl";
 import MapView from "./components/MapView";
 import BottomSheet, { type Snap } from "./components/BottomSheet";
@@ -10,9 +10,10 @@ import SettingsScreen from "./components/SettingsScreen";
 import StopList from "./components/StopList";
 import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
 import StopCard from "./components/StopCard";
-import RidesPage from "./components/RidesPage";
-import ProfilePage from "./components/ProfilePage";
-import { applyTankRange, loadGarage, loadProfile, storeGarage, storeProfile, type Garage } from "./lib/garage";
+import RideScoreCard from "./components/RideScoreCard";
+import { rideScore, roadFacts, type RoadFacts } from "./lib/rideScore";
+import { loopShapes, pickLoops, scoreLoop, type LoopShape, type ScoredLoop } from "./lib/loopChoice";
+import { requestsAtOnce } from "./lib/routeServer";
 import { applySettings, loadSettings, storeSettings, type Settings } from "./lib/settings";
 import { clearRecentSearches } from "./lib/places";
 import { loadFuelPrices, priceNear, type FuelPrice, type Snapshot } from "./lib/fuelPrices";
@@ -43,7 +44,7 @@ import {
   twistScore,
   type LatLng,
 } from "./lib/geo";
-import { defaultOptions, planRoute, planSections, snapToRoad, type RouteOptions, type RouteResult, type RouteStyle } from "./lib/routes";
+import { defaultOptions, planRoute, planSections, quickPlan, snapToRoad, type RoutePoint, type RouteOptions, type RouteResult, type RouteStyle } from "./lib/routes";
 import { elevationProfile, type ElevationProfile } from "./lib/elevation";
 import { reverseGeocode } from "./lib/places";
 import { parseGpx, sampleStops, toGpx } from "./lib/gpx";
@@ -101,6 +102,26 @@ function rememberRoutes(key: string, routes: RouteResult[]) {
   if (plannedRoutes.size > KEEP_ROUTES) plannedRoutes.delete(plannedRoutes.keys().next().value!);
 }
 
+/** What the router is asked to ride through for these stops. */
+function planPoints(stops: Stop[], returnToStart: boolean): RoutePoint[] {
+  const plan = routePoints(stops, returnToStart);
+  // No turning back at stops on a loop (or at generated loop points), so
+  // the route can't ride up a dead end and straight back down it.
+  return plan.map(({ position, stop: s, shape }, i) => {
+    const between = i > 0 && i < plan.length - 1;
+    // Shaping points only steer: the route may pass anywhere within 2 km.
+    if (between && shape >= 0) return { pos: position, via: true, radius: 2000, movable: true };
+    return {
+      pos: position,
+      noUturn: between && (returnToStart || s.auto),
+      // Generated loop points are arbitrary, so any road within 1 km will do;
+      // the rider's own pins may snap to a road within 75 m.
+      radius: between ? (s.auto ? 1000 : 75) : undefined,
+      movable: between && s.auto,
+    };
+  });
+}
+
 /** Everything about the stops that changes the route (not their names). */
 function keyOfStops(stops: Stop[]): string {
   return stops
@@ -119,12 +140,6 @@ export default function App() {
   const [routes, setRoutes] = useState<RouteResult[]>([]);
   const [selected, setSelected] = useState(0);
   const [busy, setBusy] = useState(false);
-  /** Which page the bottom bar shows: the map and planner, rides, or the rider's profile. */
-  const [page, setPage] = useState<"rides" | "map" | "profile">("map");
-  const [rider, setRider] = useState(loadProfile);
-  const [garage, setGarageState] = useState<Garage>(loadGarage);
-  const navRef = useRef<HTMLElement>(null);
-  const [navH, setNavH] = useState(0);
   /** Pins being moved onto the nearest road; planning waits for them. */
   const [snapping, setSnapping] = useState(0);
   const [error, setError] = useState("");
@@ -186,23 +201,6 @@ export default function App() {
   const [daylight, setDaylight] = useState(true);
   const mapRef = useRef<MapLibre | null>(null);
   const [riding, setRiding] = useState<{ simulate: boolean } | null>(null);
-  // The panel sits above the bottom bar: measure the bar (it grows with the phone's gesture area).
-  useLayoutEffect(() => {
-    const el = navRef.current;
-    if (!el) {
-      setNavH(0);
-      return;
-    }
-    const measure = () => setNavH(window.matchMedia("(max-width: 760px)").matches ? Math.round(el.getBoundingClientRect().height) : 0);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    window.addEventListener("resize", measure);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-  }, [riding]);
   const [rideLayer, setRideLayer] = useState<RideLayer | null>(null);
   const [followBreaks, setFollowBreaks] = useState(0);
   const wantFit = useRef(!!shared);
@@ -418,21 +416,7 @@ export default function App() {
     const t = window.setTimeout(() => {
       const ride = ridePath(stops, options.returnToStart);
       const plan = routePoints(stops, options.returnToStart);
-      // No turning back at stops on a loop (or at generated loop points), so
-      // the route can't ride up a dead end and straight back down it.
-      const points = plan.map(({ position, stop: s, shape }, i) => {
-        const between = i > 0 && i < plan.length - 1;
-        // Shaping points only steer: the route may pass anywhere within 2 km.
-        if (between && shape >= 0) return { pos: position, via: true, radius: 2000, movable: true };
-        return {
-          pos: position,
-          noUturn: between && (options.returnToStart || s.auto),
-          // Generated loop points are arbitrary, so any road within 1 km will do;
-          // the rider's own pins may snap to a road within 75 m.
-          radius: between ? (s.auto ? 1000 : 75) : undefined,
-          movable: between && s.auto,
-        };
-      });
+      const points = planPoints(stops, options.returnToStart);
       // Sections with their own style are planned one at a time and joined.
       const styles = ride.slice(0, -1).map((s) => s.legStyle);
       // The same stops and options as a moment ago (say, back to Twisty after
@@ -495,6 +479,32 @@ export default function App() {
     // stopsKey captures the positions; labels changing must not re-route.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopsKey, options, snapping > 0]);
+
+  // What the roads are (towns, motorways, dirt) for the RideScore; kept per route.
+  const [facts, setFacts] = useState<RoadFacts | null>(null);
+  const factsFor = useRef(new Map<string, RoadFacts>());
+  useEffect(() => {
+    if (!route || route.path.length < 2) {
+      setFacts(null);
+      return;
+    }
+    const known = factsFor.current.get(route.id);
+    setFacts(known ?? null);
+    if (known) return;
+    const ctrl = new AbortController();
+    roadFacts(route.path, options, ctrl.signal)
+      .then((f) => {
+        factsFor.current.set(route.id, f);
+        setFacts(f);
+      })
+      .catch(() => {
+        /* the score shows without town and surface */
+      });
+    return () => ctrl.abort();
+    // The route carries its options; options alone changing re-plans anyway.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route]);
+  const score = useMemo(() => (route ? rideScore(route, facts, profile ? profile.ascent : null) : null), [route, facts, profile]);
 
   useEffect(() => {
     setProfile(null);
@@ -595,7 +605,21 @@ export default function App() {
   }
 
   /** Direction (or side, for a loop via a place) of the last loop made, reused when resizing it. */
-  const loopShape = useRef<{ heading: number; side: 1 | -1; fitted: number; variant: number }>({ heading: 0, side: 1, fitted: 0, variant: 0 });
+  const loopShape = useRef<{ heading: number; scale: number; side: 1 | -1; fitted: number; variant: number }>({
+    heading: 0,
+    scale: 1,
+    side: 1,
+    fitted: 0,
+    variant: 0,
+  });
+  /** The loop search in progress, and the start and length it was for (to build another choice). */
+  const loopSearch = useRef<AbortController | null>(null);
+  const loopContext = useRef<{ origin: Stop; length: number; km?: number } | null>(null);
+  /** How many loop shapes are being tried (0 when not searching). */
+  const [findingLoop, setFindingLoop] = useState(0);
+  /** The loops on offer after a search: the one ridden is `loopChoice`. */
+  const [loopChoices, setLoopChoices] = useState<{ label: string; heading: number; scale: number; km: number; curves: number }[]>([]);
+  const [loopChoice, setLoopChoice] = useState(0);
   /** The place a loop was made to visit, as its stop (so Recalculate knows the loop is ours to redo). */
   const [placeStopId, setPlaceStopId] = useState<string | null>(null);
   /** The last loop via a place was sized to fit the place (from a place's card), not to a length. */
@@ -655,28 +679,103 @@ export default function App() {
       ({ waypoints: ring, viaIndex } = loop);
       canFit = !fitPlace && loop.minMetres < length * 1000 * 0.9;
       pins = [viaIndex];
+    } else if (sameShape) {
+      // Resizing to fit a riding time: the same way round, bigger or smaller.
+      ring = roundTripWaypoints(origin.position, length * 1000 * loopShape.current.scale, loopShape.current.heading, 5);
     } else {
-      // A chosen direction still varies a little, so "another loop" differs.
-      const heading = sameShape
-        ? loopShape.current.heading
-        : loopDir == null
-          ? Math.random() * 360
-          : (loopDir + Math.random() * 40 - 20 + 360) % 360;
-      loopShape.current.heading = heading;
-      ring = roundTripWaypoints(origin.position, length * 1000, heading, 5);
+      // A new loop: try several shapes, keep the best (and offer two others).
+      void findLoops(origin, length, km);
+      return;
     }
+    if (!place || sameShape) setLoopChoices((c) => (sameShape ? c : []));
+    else setLoopChoices([]);
+    applyLoop(origin, ring, pins, viaIndex, place, fitPlace, canFit, length, km);
+  }
+
+  /** Put a generated loop's stops in place (pins and shaping points from `ring`). */
+  function applyLoop(
+    origin: Stop,
+    ring: LatLng[],
+    pins: number[],
+    viaIndex: number,
+    place: { label: string; position: LatLng } | null,
+    fitPlace: boolean,
+    canFit: boolean,
+    length: number,
+    km?: number,
+  ) {
+    const stopsNow = loopStops(origin, ring, pins, viaIndex, place);
+    const via = stopsNow.slice(1);
+    setStops(stopsNow);
+    setPlaceStopId(place && fitPlace ? (via.find((v) => !v.auto)?.id ?? null) : null);
+    setOptions((o) => ({ ...o, returnToStart: true }));
+    via.filter((v) => v.auto).forEach((v) => labelStop(v.id, v.position));
+    loopFit.current = loopMode === "time" && km === undefined && canFit ? { targetSec: loopMin * 60, km: length } : null;
+    wantFit.current = true;
+  }
+
+  /** The stops for a loop from `origin` round `ring`: a few pins, the rest shaping points. */
+  function loopStops(origin: Stop, ring: LatLng[], pins: number[], viaIndex: number, place: { label: string; position: LatLng } | null): Stop[] {
     const layout = loopLayout(ring, pins);
     const via: Stop[] = layout.stops.map((p) =>
       p.index === viaIndex
         ? { id: newId(), position: p.position, label: place!.label, shape: p.shape, auto: false }
         : { id: newId(), position: p.position, label: "Locating…", auto: true, shape: p.shape },
     );
-    setStops([{ ...origin, shape: layout.startShape, auto: false }, ...via]);
-    setPlaceStopId(place && fitPlace ? (via.find((v) => !v.auto)?.id ?? null) : null);
-    setOptions((o) => ({ ...o, returnToStart: true }));
-    via.filter((v) => v.auto).forEach((v) => labelStop(v.id, v.position));
-    loopFit.current = loopMode === "time" && km === undefined && canFit ? { targetSec: loopMin * 60, km: length } : null;
-    wantFit.current = true;
+    return [{ ...origin, shape: layout.startShape, auto: false }, ...via];
+  }
+
+  /**
+   * A new round trip: try several loop shapes with one quick request each,
+   * score them (bends, length, no road ridden twice, no crossing over), then
+   * plan the best balance properly and offer the curviest and one heading
+   * another way as alternatives.
+   */
+  async function findLoops(origin: Stop, length: number, km?: number) {
+    loopSearch.current?.abort();
+    const ctrl = new AbortController();
+    loopSearch.current = ctrl;
+    const atOnce = requestsAtOnce();
+    const shapes = loopShapes(atOnce > 2 ? 8 : 6, loopDir);
+    const opts = { ...options, returnToStart: true };
+    const target = length * 1000;
+    setLoopChoices([]);
+    setFindingLoop(shapes.length);
+    const ringOf = (s: LoopShape) => roundTripWaypoints(origin.position, target * s.scale, s.heading, 5);
+    const scored: ScoredLoop[] = [];
+    try {
+      for (let i = 0; i < shapes.length; i += atOnce) {
+        await Promise.all(
+          shapes.slice(i, i + atOnce).map(async (s) => {
+            const ring = ringOf(s);
+            const r = await quickPlan(planPoints(loopStops(origin, ring, [1, 3], -1, null), true), opts, ctrl.signal);
+            if (r) scored.push(scoreLoop(s, r, target, origin.position, [origin.position, ...ring]));
+          }),
+        );
+      }
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return;
+    } finally {
+      if (loopSearch.current === ctrl) setFindingLoop(0);
+    }
+    if (ctrl.signal.aborted) return;
+    const choices = pickLoops(scored);
+    // Nothing answered (offline, server busy): fall back to one loop, planned the usual way.
+    const first = choices[0]?.loop ?? shapes[0];
+    loopContext.current = { origin, length, km };
+    setLoopChoices(choices.map((c) => ({ label: c.label, heading: c.loop.heading, scale: c.loop.scale, km: c.loop.route.distance / 1000, curves: c.loop.curves })));
+    setLoopChoice(0);
+    takeLoopShape(first);
+  }
+
+  /** Build the loop for one of the tried shapes. */
+  function takeLoopShape(s: LoopShape) {
+    const ctx = loopContext.current;
+    if (!ctx) return;
+    loopShape.current.heading = s.heading;
+    loopShape.current.scale = s.scale;
+    const ring = roundTripWaypoints(ctx.origin.position, ctx.length * 1000 * s.scale, s.heading, 5);
+    applyLoop(ctx.origin, ring, [1, 3], -1, null, false, true, ctx.length, ctx.km);
   }
 
   const isGeneratedLoop = options.returnToStart && stops.some((s) => s.auto || s.shape?.length || s.id === placeStopId);
@@ -725,26 +824,6 @@ export default function App() {
     }
     // Home always goes on the end: it's where the ride finishes.
     addStop(home.position, home.label, stops.length);
-  }
-
-  /** The map page with the planner on one of its tabs. */
-  function showOnMap(t: "plan" | "saved" | "rides", at: Snap = "full") {
-    setTab(t);
-    setSnap(at);
-    setPage("map");
-  }
-
-  /** The garage changed: the vehicle being ridden sets the vehicle type, tank range and fuel. */
-  function changeGarage(g: Garage) {
-    const before = garage.active;
-    setGarageState(g);
-    storeGarage(g);
-    const v = g.vehicles.find((x) => x.id === g.active);
-    if (!v) return;
-    setOpt("vehicle", v.kind);
-    applyTankRange(v);
-    if (settings.fuelType !== v.fuel) changeSettings({ ...settings, fuelType: v.fuel });
-    if (v.id !== before) flash(`Riding: ${v.name}`);
   }
 
   function openLoopScreen() {
@@ -988,7 +1067,7 @@ export default function App() {
           }}
         />
       ) : (
-      <BottomSheet snap={snap} onSnap={setSnap} onCover={setCover} bottom={navH}>
+      <BottomSheet snap={snap} onSnap={setSnap} onCover={setCover}>
         {recording.unfinished && !recording.state && (
           <section className="notice" role="status" data-peek>
             <p>
@@ -1003,9 +1082,10 @@ export default function App() {
             </div>
           </section>
         )}
-        {(route || busy) && (
+        {(route || busy || findingLoop > 0) && (
           <section className="summary" aria-live="polite" data-peek>
-            {busy && <div className="progress" />}
+            {(busy || findingLoop > 0) && <div className="progress" />}
+            {findingLoop > 0 && <p className="loop-note">Trying {findingLoop} loop shapes to find the best…</p>}
             {route ? (
               <>
                 <div className="summary-top">
@@ -1125,6 +1205,9 @@ export default function App() {
             ◆
           </span>
           <h1>Forge</h1>
+          <button className="settings-btn" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
+            <Icon name="settings" size={22} />
+          </button>
           <nav className="tabs" role="tablist">
             <button role="tab" aria-selected={tab === "plan"} onClick={() => setTab("plan")}>
               Plan
@@ -1140,6 +1223,29 @@ export default function App() {
 
         {tab === "plan" ? (
           <div className="scroll">
+            {/* The route's loops on offer and its RideScore: part of the scrolling planner, so they never squeeze it. */}
+            {isGeneratedLoop && loopChoices.length > 1 && findingLoop === 0 && (
+              <div className="loop-choices" role="radiogroup" aria-label="Loops to choose from">
+                {loopChoices.map((c, i) => (
+                  <button
+                    key={c.label}
+                    role="radio"
+                    aria-checked={loopChoice === i}
+                    onClick={() => {
+                      if (loopChoice === i) return;
+                      setLoopChoice(i);
+                      takeLoopShape(c);
+                    }}
+                  >
+                    <strong>{c.label}</strong>
+                    <small>
+                      {formatDistance(c.km * 1000)} · curves {c.curves}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            )}
+            {route && !busy && score && <RideScoreCard score={score} loading={!facts} />}
             <section>
               <div className="plan-search" onFocusCapture={() => setSnap("full")} data-peek={route ? undefined : ""}>
                 <PlaceSearch
@@ -1258,6 +1364,23 @@ export default function App() {
                 ))}
               </div>
               <p className="hint">{STYLES.find((s) => s.id === options.style)?.hint}</p>
+              <label className="detour-slider">
+                <span>Detours</span>
+                <input
+                  id="detour"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={Math.round((options.detour ?? 0.5) * 100)}
+                  aria-valuetext={(options.detour ?? 0.5) < 0.34 ? "Direct" : (options.detour ?? 0.5) > 0.66 ? "Adventure" : "Balanced"}
+                  onChange={(e) => setOpt("detour", +e.target.value / 100)}
+                />
+                <span className="detour-ends" aria-hidden>
+                  <small>Direct</small>
+                  <small>Adventure</small>
+                </span>
+              </label>
               <div className="toggles">
                 <label>
                   <input
@@ -1841,75 +1964,6 @@ export default function App() {
         )}
         {toast && <div className="toast">{toast}</div>}
       </main>
-      {!riding && page === "rides" && (
-        <RidesPage
-          saved={saved}
-          rides={rides}
-          onPlanned={() => showOnMap("saved")}
-          onCompleted={() => showOnMap("rides")}
-          onOpenSaved={(r) => {
-            openSaved(r);
-            setPage("map");
-          }}
-          onOpenRide={(r) => {
-            setSelectedRide(r);
-            showOnMap("rides", "half");
-            setFitKey((k) => k + 1);
-          }}
-          onRoundTrip={() => {
-            setPage("map");
-            openLoopScreen();
-          }}
-          onPlan={() => {
-            showOnMap("plan", "full");
-            requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".plan-search input, input[type=search]")?.focus());
-          }}
-        />
-      )}
-      {!riding && page === "profile" && (
-        <ProfilePage
-          profile={rider}
-          onProfile={(p) => {
-            setRider(p);
-            storeProfile(p);
-          }}
-          garage={garage}
-          onGarage={changeGarage}
-          home={home}
-          onHome={setHome}
-          onHomeHere={() =>
-            navigator.geolocation?.getCurrentPosition(
-              (pos) => setHome({ label: "Home", position: { lat: pos.coords.latitude, lng: pos.coords.longitude } }),
-              () => flash("Couldn't get your location"),
-              { enableHighAccuracy: true, timeout: 10000 },
-            )
-          }
-          near={center}
-          fuelDefault={settings.fuelType}
-          onSettings={() => setSettingsOpen(true)}
-          onBackUp={backUp}
-          onRestore={() => backupInput.current?.click()}
-          onImportGpx={() => fileInput.current?.click()}
-        />
-      )}
-      {!riding && (
-        <nav className="bottom-nav" ref={navRef} aria-label="Pages">
-          {(
-            [
-              ["rides", "Rides", "list"],
-              ["map", "Map", "map"],
-              ["profile", "Profile", "user"],
-            ] as const
-          ).map(([id, label, icon]) => (
-            <button key={id} aria-current={page === id ? "page" : undefined} onClick={() => setPage(id)}>
-              <span className="nav-pill">
-                <Icon name={icon} size={24} />
-              </span>
-              {label}
-            </button>
-          ))}
-        </nav>
-      )}
       <input
         ref={backupInput}
         type="file"
@@ -1931,7 +1985,6 @@ export default function App() {
           if (f) {
             importGpx(f);
             setTab("plan");
-            setPage("map");
           }
           e.target.value = "";
         }}
