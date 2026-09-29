@@ -33,7 +33,9 @@ under [`server/graphhopper`](../server/graphhopper).
    This downloads Java, GraphHopper and Australia's map into
    `~/graphhopper`, then builds the routing graph. That takes 20–40
    minutes. Run it again every month or two for new roads; the server keeps
-   answering from the old graph until the new one is ready.
+   answering from the old graph until the new one is ready. Run it again
+   too after an update changes `server/graphhopper/config.yml` (its
+   profiles are built into the graph), then restart the server.
 2. **Keep it running**, and start it whenever the computer starts:
    ```sh
    mkdir -p ~/.config/systemd/user

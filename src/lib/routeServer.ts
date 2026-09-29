@@ -63,8 +63,8 @@ async function askGraphHopper(base: string, path: string, body: unknown, signal:
     fetch(`${base}${url}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal });
   const profileOf = (costing: string) => (costing === "auto" ? "car" : "motorcycle");
   /** `p` on the nearest road of at least `minClass` the profile can ride, or null if none is near. */
-  const snap = async (p: { lat: number; lon: number }, profile: string, minClass?: string) => {
-    const res = await post("/route", ghSnapRequest(p, profile, minClass));
+  const snap = async (p: { lat: number; lon: number }, profile: string, minClass?: string, maxClass?: string) => {
+    const res = await post("/route", ghSnapRequest(p, profile, minClass, maxClass));
     const answer = res.ok ? ((await res.json()) as { paths?: { snapped_waypoints?: { coordinates?: [number, number][] } }[] }) : null;
     const c = answer?.paths?.[0]?.snapped_waypoints?.coordinates?.[0];
     return c ? { lat: c[1], lon: c[0] } : null;
@@ -73,15 +73,20 @@ async function askGraphHopper(base: string, path: string, body: unknown, signal:
     const b0 = body as ValhallaRouteBody;
     // Points the app placed itself snap only to proper roads (Valhalla's
     // search_filter): a loop's shaping points onto through roads, not a
-    // side street or a forestry track the route would ride up and back.
-    // With no proper road near (deep in a forest, say), any rideable road
-    // will do; a shaping point with no road near at all is skipped rather
-    // than failing the whole route, as Valhalla's radius would allow.
+    // side street or a forestry track the route would ride up and back,
+    // nor a motorway. With no proper road near (deep in a forest, say), any
+    // rideable road off a motorway will do, then any at all; a shaping point
+    // with no road near is skipped rather than failing the whole route, as
+    // Valhalla's radius would allow.
     const snapped = await Promise.all(
       b0.locations.map(async (l) => {
-        if (!l.search_filter?.min_road_class) return l;
+        const f = l.search_filter;
+        if (!f?.min_road_class && !f?.max_road_class) return l;
         const profile = profileOf(b0.costing);
-        const at = (await snap(l, profile, l.search_filter.min_road_class)) ?? (await snap(l, profile));
+        const at =
+          (await snap(l, profile, f.min_road_class, f.max_road_class)) ??
+          (f.max_road_class ? await snap(l, profile, undefined, f.max_road_class) : null) ??
+          (await snap(l, profile));
         return at ? { ...l, ...at } : l.type === "through" ? null : l;
       }),
     );
@@ -95,10 +100,10 @@ async function askGraphHopper(base: string, path: string, body: unknown, signal:
     return json({ trip: first, alternates: others.map((trip) => ({ trip })) });
   }
   if (path === "/locate") {
-    const b = body as { locations: { lat: number; lon: number; search_filter?: { min_road_class?: string } }[]; costing: string };
+    const b = body as { locations: { lat: number; lon: number; search_filter?: { min_road_class?: string; max_road_class?: string } }[]; costing: string };
     const found = await Promise.all(
       b.locations.map(async (l) => {
-        const at = await snap(l, profileOf(b.costing), l.search_filter?.min_road_class);
+        const at = await snap(l, profileOf(b.costing), l.search_filter?.min_road_class, l.search_filter?.max_road_class);
         return { edges: at ? [{ correlated_lat: at.lat, correlated_lon: at.lon }] : [] };
       }),
     );

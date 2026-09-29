@@ -1,4 +1,4 @@
-import { avoidPoints, centroid, crossings, curviness, distance, findSpurs, midpointOffset, outAndBack, sharedRoad, type LatLng } from "./geo";
+import { avoidPoints, centroid, crossings, curviness, distance, findSpurs, midpointOffset, outAndBack, resample, sharedRoad, type LatLng } from "./geo";
 import { decodePolyline } from "./polyline";
 import { requestsAtOnce, routerFetch, routerKnowsStyle } from "./routeServer";
 
@@ -165,6 +165,12 @@ export interface RoutePoint {
    */
   movable?: boolean;
   /**
+   * The rider tapped or dragged it roughly here: like a generated point, it
+   * may move off a dead end or a U-turn (see `RouteResult.moves`), but it
+   * snaps as the rider's pins do.
+   */
+  tapped?: boolean;
+  /**
    * A shaping point: the route passes near it without stopping, and it
    * doesn't split the route into legs or count as a numbered stop.
    */
@@ -229,8 +235,10 @@ async function computeRoutes(
       ...(p.heading != null ? { heading: Math.round(p.heading), heading_tolerance: 60 } : {}),
       // Generated points: skip residential streets and service roads, where
       // cul-de-sacs are; points that only steer the route snap to proper
-      // through roads (tertiary or better), never a track in a forest.
-      ...(p.movable ? { search_filter: { min_road_class: p.via ? "tertiary" : "unclassified" } } : {}),
+      // through roads (tertiary or better), never a track in a forest. Never
+      // a motorway either: one carriageway goes one way, so reaching a point
+      // there can mean riding on to the next exit and turning round.
+      ...(p.movable ? { search_filter: { min_road_class: p.via ? "tertiary" : "unclassified", max_road_class: "trunk" } } : {}),
     })),
     ...costing(opts),
     ...(alternatives && points.length === 2 ? { alternates: 2 } : {}),
@@ -413,6 +421,30 @@ async function uncrossLoop(
   return { summary: { length: sum((l) => l.summary.length), time: sum((l) => l.summary.time) }, legs };
 }
 
+/** A generated point this close to a U-turn is taken to be what made the route turn round. */
+const UTURN_REACH = 400;
+
+/**
+ * Where the way out to a U-turn at `path[at]` began: walking back from the
+ * U-turn, the last point the way back also passes (within
+ * SPUR_TOLERANCE_M). Both ways are compared every 20 m, as a straight road
+ * can have its points hundreds of metres apart.
+ */
+function retraceStart(path: LatLng[], at: number): LatLng {
+  const out = resample(path.slice(0, at + 1), 20).reverse();
+  const back = resample(path.slice(at), 20);
+  let start = out[0];
+  for (let i = 1, j = 0; i < out.length && i * 20 < 20000; i++) {
+    // The way back passes this point no further on than the way out came (and some).
+    let k = j;
+    while (k < back.length && k <= i + 25 && distance(out[i], back[k]) >= SPUR_TOLERANCE_M) k++;
+    if (k >= back.length || k > i + 25) break;
+    start = out[i];
+    j = Math.max(0, k - 2);
+  }
+  return start;
+}
+
 /** Out and back counts as the same road within this many metres (either side of a divided road). */
 const SPUR_TOLERANCE_M = 40;
 /** How far back along the route from a dead end's turn-off a moved point goes. */
@@ -424,15 +456,21 @@ const BEFORE_TURN_OFF_M = 50;
  * there can't snap back onto the dead end itself.
  */
 function beforeTurnOff(path: LatLng[], turnOff: LatLng): LatLng {
-  let at = 0;
-  for (let i = 1; i < path.length; i++) if (distance(path[i], turnOff) < distance(path[at], turnOff)) at = i;
+  // The way out reaches the turn-off first; the way back passes it again,
+  // maybe nearer (the other side of a divided road). So: the first time the
+  // route comes within SPUR_TOLERANCE_M, compared every 20 m, as a straight
+  // road can have its points hundreds of metres apart.
+  const pts = resample(path, 20);
+  let at = pts.findIndex((p) => distance(p, turnOff) < SPUR_TOLERANCE_M);
+  if (at < 0) at = pts.reduce((best, p, i) => (distance(p, turnOff) < distance(pts[best], turnOff) ? i : best), 0);
+  while (at + 1 < pts.length && distance(pts[at + 1], turnOff) < distance(pts[at], turnOff)) at++;
   // Walk back along the route from there, BEFORE_TURN_OFF_M in all.
-  let left = BEFORE_TURN_OFF_M + distance(path[at], turnOff);
+  let left = BEFORE_TURN_OFF_M + distance(pts[at], turnOff);
   for (let i = at; i > 0; i--) {
-    const d = distance(path[i], path[i - 1]);
+    const d = distance(pts[i], pts[i - 1]);
     if (d >= left) {
       const f = left / d;
-      return { lat: path[i].lat + (path[i - 1].lat - path[i].lat) * f, lng: path[i].lng + (path[i - 1].lng - path[i].lng) * f };
+      return { lat: pts[i].lat + (pts[i - 1].lat - pts[i].lat) * f, lng: pts[i].lng + (pts[i - 1].lng - pts[i].lng) * f };
     }
     left -= d;
   }
@@ -549,7 +587,7 @@ export async function planRoute(
       let best = -1;
       let bestDist = MOVE_REACH;
       points.forEach((p, i) => {
-        if (!p.movable || i === 0 || i === points.length - 1 || moves.some((m) => m.stop === i)) return;
+        if (!(p.movable || p.tapped) || i === 0 || i === points.length - 1 || moves.some((m) => m.stop === i)) return;
         const reached = numbers[i] > 0 ? reachedStop(r, numbers[i]) : null;
         const d = Math.min(distance(p.pos, spur.tip), distance(reached ?? p.pos, spur.tip));
         if (d < bestDist) {
@@ -559,6 +597,24 @@ export async function planRoute(
       });
       if (best > 0) moves.push({ stop: best, to: beforeTurnOff(r.path, spur.base) });
     }
+    // Each U-turn the router makes (short ones too, which aren't a spur
+    // worth the name) near a generated point: the point moves back to where
+    // the way out and back began, so the route no longer goes up there.
+    r.steps.forEach((st) => {
+      if (st.type !== 12 && st.type !== 13) return;
+      const at = r.path[st.at];
+      let best = -1;
+      let bestDist = UTURN_REACH;
+      points.forEach((p, i) => {
+        if (!(p.movable || p.tapped) || i === 0 || i === points.length - 1 || moves.some((m) => m.stop === i)) return;
+        const d = distance(p.pos, at);
+        if (d < bestDist) {
+          best = i;
+          bestDist = d;
+        }
+      });
+      if (best > 0) moves.push({ stop: best, to: beforeTurnOff(r.path, retraceStart(r.path, st.at)) });
+    });
     return { ...r, warnings: spurs.length ? spurs : turnsAround ? [UTURN_WARNING] : [], ...(moves.length ? { moves } : {}) };
   };
   const results = baseRoutes.map((r, i) => withWarnings(toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, [])));
@@ -659,28 +715,40 @@ export async function routeVia(
 
 /** How far a tapped or dragged pin may jump to reach a road. */
 const SNAP_REACH_M = 1000;
+/** A proper road this close wins over a nearer side street, cul-de-sac or driveway. */
+const THROUGH_ROAD_REACH_M = 300;
 
 /**
- * The nearest point on a rideable road to `p` (the route server's
- * locate), for pins the rider puts down by hand. Returns `p` unchanged if
- * there's no road within reach or the server doesn't answer quickly.
+ * Where a pin the rider taps or drags lands: a proper road (unclassified or
+ * better, short of a motorway) if one is within THROUGH_ROAD_REACH_M, so the route doesn't ride
+ * up a cul-de-sac or driveway and back to reach it; otherwise the nearest
+ * rideable road. (Holding the map places a pin exactly, for a spot up a
+ * side road.) Returns `p` unchanged if there's no road within reach or the
+ * server doesn't answer quickly.
  */
 export async function snapToRoad(p: LatLng, opts: RouteOptions, signal?: AbortSignal): Promise<LatLng> {
   try {
     const timeout = AbortSignal.timeout(5000);
+    const at = { lat: p.lat, lon: p.lng };
     const res = await routerFetch(
       "/locate",
-      { locations: [{ lat: p.lat, lon: p.lng }], costing: costing(opts).costing, verbose: false },
+      { locations: [{ ...at, search_filter: { min_road_class: "unclassified", max_road_class: "trunk" } }, at], costing: costing(opts).costing, verbose: false },
       signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeout]) : (signal ?? timeout),
     );
     if (!res.ok) return p;
-    const json = (await res.json()) as { edges?: { correlated_lat: number; correlated_lon: number }[] }[];
-    let best: LatLng | null = null;
-    for (const e of json?.[0]?.edges ?? []) {
-      const q = { lat: e.correlated_lat, lng: e.correlated_lon };
-      if (Number.isFinite(q.lat) && Number.isFinite(q.lng) && (!best || distance(p, q) < distance(p, best))) best = q;
-    }
-    return best && distance(p, best) <= SNAP_REACH_M ? best : p;
+    const json = (await res.json()) as ({ edges?: { correlated_lat: number; correlated_lon: number }[] } | null)[];
+    const nearest = (k: number) => {
+      let best: LatLng | null = null;
+      for (const e of json?.[k]?.edges ?? []) {
+        const q = { lat: e.correlated_lat, lng: e.correlated_lon };
+        if (Number.isFinite(q.lat) && Number.isFinite(q.lng) && (!best || distance(p, q) < distance(p, best))) best = q;
+      }
+      return best;
+    };
+    const through = nearest(0);
+    if (through && distance(p, through) <= THROUGH_ROAD_REACH_M) return through;
+    const any = nearest(1);
+    return any && distance(p, any) <= SNAP_REACH_M ? any : p;
   } catch (e) {
     if (signal?.aborted) throw e;
     return p;

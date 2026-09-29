@@ -11,16 +11,22 @@ graphhopper:
   graph.encoded_values: car_access, car_average_speed, road_access, road_class, road_environment, toll, surface, track_type, curvature, max_speed, urban_density, ferry_speed
   graph.urban_density.threads: 4
 
+  # Turning round mid-leg costs 10 minutes (u_turn_costs, in seconds), so a
+  # route only does it with no other way within that: 60 (GraphHopper's
+  # example) let a ride turn round rather than ride on to a better road, and
+  # the ride styles' custom models make a fixed cost count for less. Changing
+  # it means rebuilding the graph. -1 (never) made the rides up and back
+  # to a pin longer.
   profiles:
     - name: motorcycle
       turn_costs:
         vehicle_types: [motorcycle, motor_vehicle]
-        u_turn_costs: 60
+        u_turn_costs: 600
       custom_model_files: [motorcycle-base.json]
     - name: car
       turn_costs:
         vehicle_types: [motorcar, motor_vehicle]
-        u_turn_costs: 60
+        u_turn_costs: 600
       custom_model_files: [car-base.json]
   custom_models.directory: custom_models
 

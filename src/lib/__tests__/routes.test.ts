@@ -223,7 +223,7 @@ describe("twisty helper points", () => {
     vi.stubGlobal("fetch", fetchMock);
     const [r] = await planRoute([{ pos: start }, { pos: tip, movable: true }, { pos: end }], defaultOptions);
     const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
-    expect(body.locations[1].search_filter).toEqual({ min_road_class: "unclassified" });
+    expect(body.locations[1].search_filter).toEqual({ min_road_class: "unclassified", max_road_class: "trunk" });
     expect(body.locations[0].search_filter).toBeUndefined();
     expect(r.moves).toHaveLength(1);
     expect(r.moves![0].stop).toBe(1);
@@ -238,7 +238,7 @@ describe("twisty helper points", () => {
     await planRoute([{ pos: start }, { pos: destination(start, 90, 8000), via: true, radius: 2000, movable: true }, { pos: end }], defaultOptions);
     const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     expect(body.locations[1].type).toBe("through");
-    expect(body.locations[1].search_filter).toEqual({ min_road_class: "tertiary" });
+    expect(body.locations[1].search_filter).toEqual({ min_road_class: "tertiary", max_road_class: "trunk" });
   });
 
   it("moves a generated point whose dead end stops short of it", async () => {
@@ -251,6 +251,26 @@ describe("twisty helper points", () => {
     expect(r.moves).toHaveLength(1);
     expect(distance(r.moves![0].to, foot)).toBeLessThan(120);
     expect(distance(r.moves![0].to, start)).toBeLessThan(distance(foot, start));
+  });
+
+  it("moves a point on the far side of a divided road back along the way out", async () => {
+    // Out along one carriageway (a straight: just its two ends), up a side
+    // road and back along the other, 15 m off with a point every 25 m, then
+    // off south at the corner; the pin sits on the way back. It moves back
+    // along the way out, not the way back, whose points lie nearer the
+    // corner where the two ways part.
+    const corner = destination(start, 90, 1000);
+    const far = destination(corner, 90, 3000);
+    const back = (m: number) => destination(destination(far, 180, 15), 270, m);
+    const path = [start, far, destination(far, 0, 400), destination(far, 180, 15)];
+    for (let m = 25; m <= 3000; m += 25) path.push(back(m));
+    for (let m = 25; m <= 3000; m += 25) path.push(destination(back(3000), 180, m));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ trip: tripAlong(path, 12) }), { status: 200 })));
+    const [r] = await planRoute([{ pos: start }, { pos: back(1500), movable: true }, { pos: path[path.length - 1] }], defaultOptions);
+    expect(r.moves).toHaveLength(1);
+    const to = r.moves![0].to;
+    expect(Math.abs(to.lat - corner.lat) * 111000).toBeLessThan(5);
+    expect(distance(to, corner)).toBeLessThan(distance(back(1500), corner));
   });
 
   it("doesn't move the rider's own pins", async () => {
@@ -622,7 +642,23 @@ describe("snapping a pin to the road", () => {
     expect(await snapToRoad(paddock, defaultOptions)).toEqual(road);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toMatch(/\/locate$/);
-    expect(JSON.parse(init.body as string)).toMatchObject({ costing: "motorcycle", locations: [{ lat: paddock.lat, lon: paddock.lng }] });
+    // Asks for a proper road and for any road at once.
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      costing: "motorcycle",
+      locations: [{ lat: paddock.lat, lon: paddock.lng, search_filter: { min_road_class: "unclassified", max_road_class: "trunk" } }, { lat: paddock.lat, lon: paddock.lng }],
+    });
+  });
+
+  it("prefers a proper road nearby over a nearer side street, so the route doesn't ride up it and back", async () => {
+    const answer = (through: number) => {
+      const edge = (q: { lat: number; lng: number }) => ({ correlated_lat: q.lat, correlated_lon: q.lng });
+      // First location: proper roads only; second: any road.
+      return new Response(JSON.stringify([{ edges: [edge(destination(paddock, 0, through))] }, { edges: [edge(destination(paddock, 90, 20))] }]));
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => answer(250)));
+    expect(distance(await snapToRoad(paddock, defaultOptions), destination(paddock, 0, 250))).toBeLessThan(1);
+    vi.stubGlobal("fetch", vi.fn(async () => answer(600)));
+    expect(distance(await snapToRoad(paddock, defaultOptions), destination(paddock, 90, 20))).toBeLessThan(1);
   });
 
   it("leaves the pin where it is when the nearest road is far away, or the router doesn't answer", async () => {

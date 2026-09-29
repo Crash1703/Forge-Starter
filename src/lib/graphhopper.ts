@@ -25,11 +25,13 @@ interface ValhallaLocation {
   heading?: number;
   /** Metres around the point within which any road will do (Valhalla's radius). */
   radius?: number;
-  search_filter?: { min_road_class?: string };
+  search_filter?: { min_road_class?: string; max_road_class?: string };
 }
 
 /** Valhalla's road classes, best first, and GraphHopper's names for what lies below each. */
 const VALHALLA_CLASSES = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "service_other"];
+/** GraphHopper's names for Valhalla's classes above the lowest, for a max_road_class filter. */
+const GH_CLASS: Record<string, string> = { motorway: "MOTORWAY", trunk: "TRUNK", primary: "PRIMARY", secondary: "SECONDARY", tertiary: "TERTIARY" };
 const GH_BELOW: Record<string, string[]> = {
   tertiary: ["UNCLASSIFIED"],
   unclassified: ["RESIDENTIAL", "LIVING_STREET"],
@@ -42,9 +44,13 @@ const GH_BELOW: Record<string, string[]> = {
  * custom model rules out, so a point-to-itself route snaps as Valhalla's
  * search_filter would (and only ever onto a road the profile can ride).
  */
-export function ghSnapRequest(p: { lat: number; lon: number }, profile: string, minClass?: string) {
+export function ghSnapRequest(p: { lat: number; lon: number }, profile: string, minClass?: string, maxClass?: string) {
   const from = minClass ? VALHALLA_CLASSES.indexOf(minClass) : -1;
-  const below = from < 0 ? [] : VALHALLA_CLASSES.slice(from).flatMap((c) => GH_BELOW[c] ?? []);
+  const to = maxClass ? VALHALLA_CLASSES.indexOf(maxClass) : -1;
+  const below = [
+    ...(from < 0 ? [] : VALHALLA_CLASSES.slice(from).flatMap((c) => GH_BELOW[c] ?? [])),
+    ...(to < 0 ? [] : VALHALLA_CLASSES.slice(0, to).map((c) => GH_CLASS[c])),
+  ];
   return {
     profile,
     points: [

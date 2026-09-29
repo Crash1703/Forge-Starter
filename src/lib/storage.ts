@@ -19,6 +19,12 @@ export interface Stop {
   named?: boolean;
   /** Placed by holding on the map: stays exactly there, not snapped to a road. */
   free?: boolean;
+  /**
+   * Tapped or dragged onto the map (not searched for, not held): only
+   * roughly where the rider wants to go, so if the route has to ride up a
+   * dead end or turn round to reach it, it may move back to the through road.
+   */
+  tapped?: boolean;
 }
 
 /**
