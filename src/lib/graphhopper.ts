@@ -23,6 +23,39 @@ interface ValhallaLocation {
   lon: number;
   type?: "break" | "through" | "break_through" | "via";
   heading?: number;
+  /** Metres around the point within which any road will do (Valhalla's radius). */
+  radius?: number;
+  search_filter?: { min_road_class?: string };
+}
+
+/** Valhalla's road classes, best first, and GraphHopper's names for what lies below each. */
+const VALHALLA_CLASSES = ["motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "service_other"];
+const GH_BELOW: Record<string, string[]> = {
+  tertiary: ["UNCLASSIFIED"],
+  unclassified: ["RESIDENTIAL", "LIVING_STREET"],
+  residential: ["SERVICE", "TRACK", "ROAD", "OTHER"],
+};
+
+/**
+ * A request that only snaps `p` onto a road: GraphHopper has no road-class
+ * filter for its nearest-road lookup, but snapping skips roads a request's
+ * custom model rules out, so a point-to-itself route snaps as Valhalla's
+ * search_filter would (and only ever onto a road the profile can ride).
+ */
+export function ghSnapRequest(p: { lat: number; lon: number }, profile: string, minClass?: string) {
+  const from = minClass ? VALHALLA_CLASSES.indexOf(minClass) : -1;
+  const below = from < 0 ? [] : VALHALLA_CLASSES.slice(from).flatMap((c) => GH_BELOW[c] ?? []);
+  return {
+    profile,
+    points: [
+      [p.lon, p.lat],
+      [p.lon, p.lat],
+    ],
+    custom_model: { priority: below.length ? [{ if: below.map((c) => `road_class == ${c}`).join(" || "), multiply_by: "0" }] : [] },
+    "ch.disable": true,
+    instructions: false,
+    points_encoded: false,
+  };
 }
 
 export interface ValhallaRouteBody {
@@ -106,14 +139,17 @@ function square(p: { lat: number; lon: number }, half: number): [number, number]
 /** GraphHopper's /route request for a Valhalla /route body. */
 export function ghRouteRequest(body: ValhallaRouteBody) {
   const locs = body.locations;
-  const between = locs.slice(1, -1);
   const alternates = locs.length === 2 ? (body.alternates ?? 0) : 0;
   return {
     profile: body.costing === "motorcycle" ? "motorcycle" : "car",
     points: locs.map((l) => [l.lon, l.lat]),
     ...(locs.some((l) => l.heading != null) ? { headings: locs.map((l) => l.heading ?? Number.NaN) } : {}),
-    // No turning round at loop points and generated points (Valhalla's through / break_through).
-    pass_through: between.length > 0 && between.every((l) => l.type === "through" || l.type === "break_through" || l.type === "via"),
+    // No pass_through (GraphHopper's "no turning round at via points"),
+    // unlike Valhalla's break_through: with turn costs it rides on past a
+    // point to loop round a block, or finds no route at all, and on a
+    // loop's points (already snapped onto through roads) it isn't needed.
+    // A dead end ridden up and back is still caught (planRoute's spurs).
+    pass_through: false,
     custom_model: styleModel(body),
     "ch.disable": true,
     instructions: true,
