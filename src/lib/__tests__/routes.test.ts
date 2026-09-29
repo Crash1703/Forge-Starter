@@ -31,6 +31,7 @@ describe("costing", () => {
     expect(costing(defaultOptions)).toEqual({
       costing: "motorcycle",
       costing_options: { motorcycle: { use_highways: 0, use_tolls: 0.5, use_ferry: 0.5, use_trails: 0 } },
+      _rf: { style: "scenic", detour: 0.5 },
     });
   });
 
@@ -39,6 +40,7 @@ describe("costing", () => {
     expect(costing(fast)).toEqual({
       costing: "auto",
       costing_options: { auto: { use_highways: 1, use_tolls: 0, use_ferry: 0.5, exclude_unpaved: true } },
+      _rf: { style: "fastest", detour: 0.5 },
     });
     expect(costing({ ...fast, avoidHighways: true }).costing_options).toMatchObject({ auto: { use_highways: 0 } });
   });

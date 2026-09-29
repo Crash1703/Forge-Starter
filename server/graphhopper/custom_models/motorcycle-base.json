@@ -1,0 +1,18 @@
+// Ride Forge's motorcycle base: where a motorcycle may go, and how fast.
+// The app adds its ride style (fastest / scenic / twisty) and avoid options
+// per request; those only ever lower priorities and raise distance_influence,
+// as landmarks require (so the base keeps it low: 15).
+{
+  "distance_influence": 15,
+  "priority": [
+    { "if": "!car_access", "multiply_by": "0" },
+    { "if": "road_access == PRIVATE", "multiply_by": "0" },
+    { "if": "road_access == DESTINATION", "multiply_by": "0.1" },
+    { "if": "track_type.ordinal() > 1", "multiply_by": "0" }
+  ],
+  "speed": [
+    { "if": "true", "limit_to": "0.95 * car_average_speed" },
+    { "if": "true", "limit_to": "110" },
+    { "if": "surface == GRAVEL || surface == DIRT || surface == GROUND || surface == UNPAVED || surface == COMPACTED || surface == SAND || surface == GRASS", "limit_to": "50" }
+  ]
+}

@@ -1,0 +1,13 @@
+// Ride Forge's car base: the app adds its options per request.
+{
+  "distance_influence": 15,
+  "priority": [
+    { "if": "!car_access", "multiply_by": "0" },
+    { "if": "road_access == PRIVATE", "multiply_by": "0" },
+    { "if": "road_access == DESTINATION", "multiply_by": "0.1" }
+  ],
+  "speed": [
+    { "if": "true", "limit_to": "car_average_speed" },
+    { "if": "true", "limit_to": "110" }
+  ]
+}
