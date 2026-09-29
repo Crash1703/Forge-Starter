@@ -10,9 +10,8 @@ import { Announcer, maneuverKind, Navigator, spliceRejoin, type Fix, type NavRou
 import { routeBack, routeVia, speedLimits, type RouteOptions, type RouteResult } from "../lib/routes";
 import {
   askToShowRideNotification,
-  clearNextTurn,
+  clearOldTurnNotification,
   keepScreenOn,
-  showNextTurn,
   showOverLockScreen,
   simulateRide,
   speak,
@@ -155,6 +154,8 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
       if (!simulate) await askToShowRideNotification();
       // Waking the phone mid-ride shows the ride, not the lock screen.
       if (!simulate) void showOverLockScreen(true);
+      // 1.52 showed the next turn in a notification of its own; clear any left behind.
+      if (!simulate) void clearOldTurnNotification();
       letSleep = energySaving ? () => undefined : await keepScreenOn().catch(() => () => undefined);
       letSleepRef.current = letSleep;
       stopGps = simulate
@@ -170,7 +171,6 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
       onLayer(null);
       if (!simulate) {
         void showOverLockScreen(false);
-        void clearNextTurn();
       }
     };
     // One ride per mount.
@@ -255,20 +255,6 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
   const over = limit != null && speedKmh != null && speedKmh > limit + 3;
   const eta = state ? new Date(Date.now() + state.remainingTime * 1000) : null;
 
-  // The next turn on the lock screen (a silent notification), kept up to date.
-  const turnTitle = paused
-    ? "Ride paused"
-    : state?.arrived
-      ? endsHome
-        ? "Back home"
-        : "Arrived"
-      : state && next
-        ? `${formatDistance(state.toNext)} · ${next.street ? `${next.exit ? `Exit ${next.exit} · ` : ""}${next.street}` : next.instruction}`
-        : "Starting your ride…";
-  const turnBody = state && !state.arrived ? `${formatDistance(state.remaining)} to go · arrive ${eta ? formatTime(eta) : "–"}` : "Ride Forge";
-  useEffect(() => {
-    if (!simulate) void showNextTurn(turnTitle, turnBody);
-  }, [simulate, turnTitle, turnBody]);
 
   return (
     <div className="ride" role="region" aria-label="Ride mode">
