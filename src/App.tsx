@@ -21,7 +21,7 @@ import { loadFuelPrices, priceNear, type FuelPrice, type Snapshot } from "./lib/
 import { MAX_SPAN, SIGHT_NAMES, sightsIn, type Bounds, type Sight } from "./lib/sights";
 import WeatherStrip from "./components/WeatherStrip";
 import StopsAlong from "./components/StopsAlong";
-import type { Poi } from "./lib/pois";
+import { poiKind, type Poi } from "./lib/pois";
 import { useRecording } from "./lib/useRecording";
 import { deleteRide, listRides, putRide } from "./lib/rideStore";
 import { trackPath, type RideRecord } from "./lib/recorder";
@@ -184,6 +184,13 @@ export default function App() {
   const [sights, setSights] = useState<Sight[]>([]);
   const [sightsNote, setSightsNote] = useState("");
   const [sight, setSight] = useState<Sight | null>(null);
+  /** A place along the route (fuel, a café…) whose card is open. */
+  const [poiCard, setPoiCard] = useState<Poi | null>(null);
+  /** Close the card of a sight or a place along the route. */
+  const closePlace = () => {
+    setSight(null);
+    setPoiCard(null);
+  };
   /** The stop whose pin was tapped: its card is open. */
   const [stopCardId, setStopCardId] = useState<string | null>(null);
   /** The open place's "Loop via here": choosing where to start. */
@@ -303,6 +310,31 @@ export default function App() {
     (p: LatLng): FuelPrice | null => (fuelData && settings.fuelToken ? priceNear(p, fuelData, settings.fuelType) : null),
     [fuelData, settings.fuelToken, settings.fuelType],
   );
+
+  /** What the open place card shows: a sight, or a place along the route (with its fuel price). */
+  const place: { name: string; position: LatLng; note: string; photo?: string; link?: { href: string; label: string } } | null = sight
+    ? {
+        name: sight.name,
+        position: sight.position,
+        note: `${SIGHT_NAMES[sight.kind]}${sight.ele != null ? ` · ${sight.ele.toLocaleString()} m` : ""}`,
+        photo: sight.photo,
+        ...(sight.link ? { link: { href: sight.link, label: "Wikipedia ↗" } } : {}),
+      }
+    : poiCard
+      ? {
+          name: poiCard.name,
+          position: poiCard.position,
+          note: [
+            poiKind(poiCard.kind).one,
+            poiCard.kind === "fuel" && priceAt(poiCard.position) ? `${priceAt(poiCard.position)!.cents.toFixed(1)} c/L` : "",
+            `${formatDistance(poiCard.at)} along the route`,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          // Opening hours, reviews and photos live there.
+          link: { href: `https://www.google.com/maps/search/?api=1&query=${poiCard.position.lat},${poiCard.position.lng}`, label: "Google Maps ↗" },
+        }
+      : null;
 
   // Auto map theme: dark from dusk to dawn where the map is (checked every 5 minutes).
   useEffect(() => {
@@ -566,6 +598,24 @@ export default function App() {
     if (!label && free) labelStop(id, position);
     else if (!label) placeOnRoad(id, position, true);
     if (at === undefined && stops.length <= 1) wantFit.current = true;
+  }
+
+  /**
+   * A new ride straight to a place: from where the rider is (or the current
+   * start if their location isn't known yet), not a loop.
+   */
+  function rideTo(to: { name: string; position: LatLng }) {
+    const from = me ? { id: newId(), position: me, label: "My location" } : stops[0] ? { ...stops[0], shape: undefined } : null;
+    if (!from) {
+      flash("Set a start point first");
+      return;
+    }
+    closePlace();
+    setLoopChoices([]);
+    setOptions((o) => ({ ...o, returnToStart: false }));
+    setStops([from, { id: newId(), position: to.position, label: to.name }]);
+    setName("");
+    wantFit.current = true;
   }
 
   /**
@@ -1669,7 +1719,14 @@ export default function App() {
             home={settings.showHome ? (home?.position ?? null) : null}
             onSightClick={(x) => {
               setStopCardId(null);
+              setPoiCard(null);
               setSight(x);
+            }}
+            onPoiClick={(x) => {
+              setStopCardId(null);
+              setSight(null);
+              setLoopPick(false);
+              setPoiCard(x);
             }}
             onMapClick={(p) => {
               // With a pin's card open, a tap on the map just closes it.
@@ -1682,7 +1739,7 @@ export default function App() {
               flash("Pin placed exactly where you held");
             }}
             onStopClick={(id) => {
-              setSight(null);
+              closePlace();
               setStopCardId(id);
               // Room for the card on the map.
               setSnap("peek");
@@ -1718,7 +1775,7 @@ export default function App() {
               aria-pressed={sightsOn}
               onClick={() => {
                 setSightsOn((on) => !on);
-                setSight(null);
+                closePlace();
               }}
             >
               <Icon name="camera" size={18} /> Sights{sightsOn && <Icon name="close" size={16} />}
@@ -1728,7 +1785,7 @@ export default function App() {
               aria-pressed={passesOn}
               onClick={() => {
                 setPassesOn((on) => !on);
-                setSight(null);
+                closePlace();
               }}
             >
               <Icon name="mountain" size={18} /> Passes{passesOn && <Icon name="close" size={16} />}
@@ -1816,24 +1873,26 @@ export default function App() {
             onClose={() => setStopCardId(null)}
           />
         )}
-        {!riding && sight && (
-          <div className={`sight-card${loopPick ? " picking" : ""}`} role="dialog" aria-label={sight.name}>
-            {sight.photo && !loopPick && <img src={sight.photo.replace(/width=\d+/, "width=480")} alt="" />}
+        {!riding && place && (
+          <div className={`sight-card${loopPick ? " picking" : ""}`} role="dialog" aria-label={place.name}>
+            {place.photo && !loopPick && <img src={place.photo.replace(/width=\d+/, "width=480")} alt="" />}
             <div className="sight-body">
-              <small>
-                {SIGHT_NAMES[sight.kind]}
-                {sight.ele != null ? ` · ${sight.ele.toLocaleString()} m` : ""}
-              </small>
-              <strong>{sight.name}</strong>
+              <small>{place.note}</small>
+              <strong>{place.name}</strong>
               <div className="button-row">
                 <button
                   className="primary"
                   onClick={() => {
-                    addStop(sight.position, sight.name);
-                    setSight(null);
+                    // A place along the route goes in where it fits on the way.
+                    addStop(place.position, place.name, poiCard && stops.length >= 2 ? bestInsertIndex(stops.map((s) => s.position), place.position, options.returnToStart) : undefined);
+                    closePlace();
+                    flash(`${place.name} added`);
                   }}
                 >
-                  <Icon name="plus" size={18} /> Add as stop
+                  <Icon name="plus" size={18} /> {poiCard && stops.length >= 2 ? "Stop on the way" : "Add as stop"}
+                </button>
+                <button onClick={() => rideTo(place)}>
+                  <Icon name="navigate" size={18} /> Ride here
                 </button>
                 <button
                   aria-expanded={loopPick}
@@ -1845,9 +1904,9 @@ export default function App() {
                 >
                   <Icon name="loop" size={18} /> Loop via here
                 </button>
-                {sight.link && (
-                  <a className="button" href={sight.link} target="_blank" rel="noreferrer">
-                    Wikipedia ↗
+                {place.link && (
+                  <a className="button" href={place.link.href} target="_blank" rel="noreferrer">
+                    {place.link.label}
                   </a>
                 )}
               </div>
@@ -1868,11 +1927,11 @@ export default function App() {
                       key={start}
                       disabled={locating}
                       onClick={() => {
-                        const place = { label: sight.name, position: sight.position };
-                        setLoopVia(place);
+                        const via = { label: place.name, position: place.position };
+                        setLoopVia(via);
                         setLoopStart(start);
-                        setSight(null);
-                        createLoop(start, place, true);
+                        closePlace();
+                        createLoop(start, via, true);
                       }}
                     >
                       <Icon name={start === "home" ? "home" : start === "here" ? "locate" : "navigate"} size={18} /> {label}
@@ -1881,8 +1940,8 @@ export default function App() {
                   <button
                     className="link"
                     onClick={() => {
-                      setLoopVia({ label: sight.name, position: sight.position });
-                      setSight(null);
+                      setLoopVia({ label: place.name, position: place.position });
+                      closePlace();
                       openLoopScreen();
                     }}
                   >
@@ -1891,7 +1950,7 @@ export default function App() {
                 </div>
               )}
             </div>
-            <button className="close" aria-label="Close" onClick={() => setSight(null)}>
+            <button className="close" aria-label="Close" onClick={() => closePlace()}>
               ✕
             </button>
           </div>
@@ -1920,7 +1979,7 @@ export default function App() {
           >
             <span aria-hidden>{recording.state ? <Icon name="stop" size={18} filled /> : "●"}</span>
           </button>
-          <button className="fab" onClick={openLoopScreen} aria-label="Plan a round trip" title="Plan a round trip">
+          <button className="fab accent" onClick={openLoopScreen} aria-label="Plan a round trip" title="Plan a round trip">
             <Icon name="loop" size={22} />
           </button>
           <button className="fab" onClick={centreOnMe} aria-label="Show my location">
