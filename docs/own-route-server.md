@@ -46,9 +46,21 @@ under [`server/graphhopper`](../server/graphhopper).
    ```sh
    curl -s http://localhost:8989/info | head -c 300
    ```
-3. **Reach it from your phone over https**, as in
-   [step 3 below](#3-reach-it-from-your-phone-over-https), but with port
-   **8989** instead of 8002.
+3. **Reach it from your phone over https.** The quickest way is a
+   Cloudflare quick tunnel (no account needed), run as a service too:
+   ```sh
+   curl -L -o ~/graphhopper/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+   chmod +x ~/graphhopper/cloudflared
+   cp ~/Forge-Starter/server/graphhopper/ride-forge-tunnel.service ~/.config/systemd/user/
+   systemctl --user daemon-reload
+   systemctl --user enable --now ride-forge-tunnel
+   journalctl --user -u ride-forge-tunnel | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1
+   ```
+   The last command prints the address. It changes whenever the tunnel
+   restarts (say, after a reboot): run that last line again and update it in
+   the app. For an address that never changes, use Tailscale Funnel or a
+   named Cloudflare tunnel, as in
+   [step 3 below](#3-reach-it-from-your-phone-over-https), with port **8989**.
 4. **In the app**, open **Settings → Route server**, paste the https
    address and tap **Check and use**. It should say
    `Working: GraphHopper 11.0, map from …`.
