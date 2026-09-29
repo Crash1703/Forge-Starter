@@ -30,7 +30,8 @@ describe("the rider's own route server", () => {
     vi.stubGlobal("fetch", f);
     const res = await routerFetch("/route", {});
     expect(res.status).toBe(400);
-    expect(f.mock.calls.map((c) => String(c[0]))).toEqual([`${HOME}/route`]);
+    // First it finds out what kind of server it is (no /info: Valhalla).
+    expect(f.mock.calls.map((c) => String(c[0]))).toEqual([`${HOME}/info`, `${HOME}/route`]);
     expect(requestsAtOnce()).toBe(4);
   });
 
@@ -43,7 +44,7 @@ describe("the rider's own route server", () => {
     vi.stubGlobal("fetch", f);
     const res = await routerFetch("/route", {});
     expect(res.ok).toBe(true);
-    expect(f.mock.calls.map((c) => String(c[0]))).toEqual([`${HOME}/route`, `${VALHALLA_URL}/route`]);
+    expect(f.mock.calls.map((c) => String(c[0]))).toEqual([`${HOME}/info`, `${VALHALLA_URL}/route`]);
   });
 
   it("falls back when the tunnel answers but the computer behind it doesn't", async () => {

@@ -1,0 +1,12 @@
+# systemd user service: copy to ~/.config/systemd/user/ (see docs/own-route-server.md).
+[Unit]
+Description=Ride Forge route server (GraphHopper)
+After=network-online.target
+
+[Service]
+ExecStart=%h/Forge-Starter/server/graphhopper/start.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

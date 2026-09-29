@@ -1,15 +1,76 @@
 # Your own route server (on a computer at home)
 
-Ride Forge plans routes with [Valhalla](https://github.com/valhalla/valhalla).
-By default it asks the free public server in Germany. That server is shared
-with everyone, so each request takes 1–5 seconds, and a twisty loop needs
-several requests. Your own Valhalla server with just Australia's roads
-answers in a fraction of a second.
+By default Ride Forge asks the free public [Valhalla](https://github.com/valhalla/valhalla)
+server in Germany. That server is shared with everyone, so each request takes
+1–5 seconds, and a twisty loop needs several requests.
+
+A server of your own with just Australia's roads answers in a fraction of a
+second. There are two kinds to choose from:
+
+- **GraphHopper (recommended).** The app sends your ride style with each
+  request, and GraphHopper chooses roads by it: curvy, rural and sealed for
+  Twisty, away from towns and motorways for Scenic. So routes come out
+  twistier by design, instead of the app only comparing candidates
+  afterwards. It runs without Docker or admin rights. See
+  [GraphHopper](#graphhopper-recommended) below.
+- **Valhalla.** The same engine as the public server, just faster. See
+  [Valhalla](#valhalla) below.
 
 The app always falls back to the public server. If your computer is off or
 asleep, routes still plan, just more slowly.
 
-## What you need
+## GraphHopper (recommended)
+
+You need a Linux computer (or VM) that's on when you ride, with 12 GB of
+memory or more and about 15 GB of free disk. The files are in this repo
+under [`server/graphhopper`](../server/graphhopper).
+
+1. **Build it.** In a terminal:
+   ```sh
+   git clone https://github.com/Crash1703/Forge-Starter.git
+   ~/Forge-Starter/server/graphhopper/setup.sh
+   ```
+   This downloads Java, GraphHopper and Australia's map into
+   `~/graphhopper`, then builds the routing graph. That takes 20–40
+   minutes. Run it again every month or two for new roads; the server keeps
+   answering from the old graph until the new one is ready.
+2. **Keep it running**, and start it whenever the computer starts:
+   ```sh
+   mkdir -p ~/.config/systemd/user
+   cp ~/Forge-Starter/server/graphhopper/ride-forge-graphhopper.service ~/.config/systemd/user/
+   systemctl --user daemon-reload
+   systemctl --user enable --now ride-forge-graphhopper
+   sudo loginctl enable-linger $USER   # start at boot, even before you log in
+   ```
+   After a minute, this should list `motorcycle` and `car`:
+   ```sh
+   curl -s http://localhost:8989/info | head -c 300
+   ```
+3. **Reach it from your phone over https.** The quickest way is a
+   Cloudflare quick tunnel (no account needed), run as a service too:
+   ```sh
+   curl -L -o ~/graphhopper/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+   chmod +x ~/graphhopper/cloudflared
+   cp ~/Forge-Starter/server/graphhopper/ride-forge-tunnel.service ~/.config/systemd/user/
+   systemctl --user daemon-reload
+   systemctl --user enable --now ride-forge-tunnel
+   journalctl --user -u ride-forge-tunnel | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1
+   ```
+   The last command prints the address. It changes whenever the tunnel
+   restarts (say, after a reboot): run that last line again and update it in
+   the app. For an address that never changes, use Tailscale Funnel or a
+   named Cloudflare tunnel, as in
+   [step 3 below](#3-reach-it-from-your-phone-over-https), with port **8989**.
+4. **In the app**, open **Settings → Route server**, paste the https
+   address and tap **Check and use**. It should say
+   `Working: GraphHopper 11.0, map from …`.
+
+The server only listens on the computer itself (`localhost`); the tunnel is
+what lets your phone in.
+
+## Valhalla
+
+### What you need
 
 - **A computer that's on when you ride.** Windows, Mac or Linux all work,
   and so does a spare PC or mini PC. It needs:
@@ -22,7 +83,7 @@ asleep, routes still plan, just more slowly.
   covers this. A plain `http://192.168.x.x` address won't work, because the
   app only talks to https addresses.
 
-## 1. Start Valhalla with Australia's roads
+### 1. Start Valhalla with Australia's roads
 
 In a terminal, in a folder where you want the map data kept:
 
@@ -52,7 +113,7 @@ curl http://localhost:8002/status
 `--restart unless-stopped` starts Valhalla again whenever the computer
 restarts.
 
-## 2. Keep the map up to date (every month or two)
+### 2. Keep the map up to date (every month or two)
 
 New roads appear in OpenStreetMap all the time. To rebuild with fresh data:
 
@@ -63,9 +124,10 @@ rm -rf valhalla_files
 
 Then run the command from step 1 again.
 
-## 3. Reach it from your phone, over https
+## 3. Reach it from your phone over https
 
-Pick one of these. Both are free and don't need any router settings.
+Pick one of these. Both are free and don't need any router settings. The
+commands use Valhalla's port, 8002; for GraphHopper use **8989**.
 
 ### Option A: Tailscale Funnel (a fixed address; recommended)
 
@@ -98,7 +160,7 @@ a named tunnel gives you a fixed address.
 
 In the app, open **Settings → Route server** and paste the https address.
 Then tap **Check and use**. It should say
-`Working: Valhalla 3.x`.
+`Working: GraphHopper 11.0, map from …` or `Working: Valhalla 3.x`.
 
 With your own server, the app sends four detour tries at once, not two, so
 Twisty routes finish sooner as well.
@@ -111,9 +173,11 @@ server**.
 - **"No answer from that address"**
   - Check the computer is awake.
   - Check the tunnel (Tailscale or cloudflared) is running.
-  - Check `curl http://localhost:8002/status` works on the computer itself.
+  - On the computer itself, check `curl http://localhost:8989/info`
+    (GraphHopper) or `curl http://localhost:8002/status` (Valhalla) works.
 - **"The server answered, but not as a route server"**
-  - The tunnel is up, but Valhalla isn't running yet.
-  - Look at `docker logs valhalla`. The first build takes a while.
+  - The tunnel is up, but the server isn't running yet.
+  - GraphHopper: `journalctl --user -u ride-forge-graphhopper`. Valhalla:
+    `docker logs valhalla`. The first build takes a while.
 - **Stop the computer sleeping.** Set its power options to never sleep, at
   least while you're out riding.

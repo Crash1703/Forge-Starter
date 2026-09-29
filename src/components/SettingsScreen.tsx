@@ -167,7 +167,7 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
               <strong>Your own route server</strong>
               <small>
                 {s.routeServer ? `Using ${s.routeServer}. ` : "Using the free public server. "}
-                A Valhalla server of your own (say, on a computer at home) plans much faster:{" "}
+                A GraphHopper or Valhalla server of your own (say, on a computer at home) plans much faster, and GraphHopper picks curvier roads:{" "}
                 <a href="https://github.com/Crash1703/Forge-Starter/blob/main/docs/own-route-server.md" target="_blank" rel="noreferrer">
                   how to set one up
                 </a>

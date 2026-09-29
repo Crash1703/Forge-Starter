@@ -1,6 +1,6 @@
 import { avoidPoints, centroid, crossings, curviness, distance, findSpurs, midpointOffset, outAndBack, sharedRoad, type LatLng } from "./geo";
 import { decodePolyline } from "./polyline";
-import { requestsAtOnce, routerFetch } from "./routeServer";
+import { requestsAtOnce, routerFetch, routerKnowsStyle } from "./routeServer";
 
 export type RouteStyle = "fastest" | "scenic" | "twisty";
 export type Vehicle = "motorcycle" | "car";
@@ -203,12 +203,14 @@ export function costing(opts: RouteOptions) {
     use_ferry: opts.avoidFerries ? 0 : 0.5,
   };
   const dirtOk = opts.avoidUnpaved === false;
-  if (opts.vehicle === "car") return { costing: "auto", costing_options: { auto: { ...common, ...(dirtOk ? {} : { exclude_unpaved: true }) } } };
+  // The ride style for a GraphHopper server, which chooses roads by it (Valhalla never sees this).
+  const _rf = { style: opts.style, detour: detourLevel(opts) };
+  if (opts.vehicle === "car") return { costing: "auto", costing_options: { auto: { ...common, ...(dirtOk ? {} : { exclude_unpaved: true }) } }, _rf };
   // Motorcycle costing favours smaller roads as use_highways drops. use_trails
   // 0 keeps it on sealed roads wherever there's a way (from Imbil to Jimna it
   // rides 143 km sealed rather than 58 km with 48 km of gravel); 0.5 lets it
   // take gravel when that's the natural way.
-  return { costing: "motorcycle", costing_options: { motorcycle: { ...common, use_trails: dirtOk ? 0.5 : 0 } } };
+  return { costing: "motorcycle", costing_options: { motorcycle: { ...common, use_trails: dirtOk ? 0.5 : 0 } }, _rf };
 }
 
 async function computeRoutes(
@@ -534,7 +536,9 @@ export async function planRoute(
   };
   const results = baseRoutes.map((r, i) => withWarnings(toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, [])));
 
-  if (opts.style === "twisty" && stops.length < MAX_STOPS) {
+  // Valhalla doesn't know twisty roads from straight ones, so try detours
+  // for them; a GraphHopper server already chose its roads by the style.
+  if (opts.style === "twisty" && stops.length < MAX_STOPS && !routerKnowsStyle()) {
     // Longest straight-line leg is where a detour has the most room to find better roads.
     let leg = 0;
     for (let i = 1; i < stops.length - 1; i++) {
