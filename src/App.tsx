@@ -1920,7 +1920,7 @@ export default function App() {
           >
             <span aria-hidden>{recording.state ? <Icon name="stop" size={18} filled /> : "●"}</span>
           </button>
-          <button className="fab" onClick={openLoopScreen} aria-label="Plan a round trip" title="Plan a round trip">
+          <button className="fab accent" onClick={openLoopScreen} aria-label="Plan a round trip" title="Plan a round trip">
             <Icon name="loop" size={22} />
           </button>
           <button className="fab" onClick={centreOnMe} aria-label="Show my location">

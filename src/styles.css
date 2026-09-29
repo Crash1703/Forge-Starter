@@ -468,6 +468,8 @@ button.primary:hover:not(:disabled) { filter: brightness(1.05); }
 .fab { width: 52px; height: 52px; border: none; font-size: 1rem; color: var(--text); gap: 0; }
 .fab .icon + small { margin-top: 3px; }
 .fab.rec span { display: grid; place-items: center; }
+/* Planning a round trip is the main thing to do from the map: it stands out in the accent orange. */
+.fab.accent { background: var(--accent); color: var(--accent-ink); }
 .chip-toggle { gap: 8px; }
 .summary-tools > button, .summary-actions > button { gap: 8px; }
 .layers-menu .layer-icon { color: var(--text); }
