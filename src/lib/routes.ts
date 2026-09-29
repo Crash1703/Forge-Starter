@@ -1,4 +1,4 @@
-import { avoidPoints, centroid, crossings, curviness, distance, findSpurs, midpointOffset, outAndBack, sharedRoad, type LatLng } from "./geo";
+import { avoidPoints, centroid, crossings, curviness, distance, findSpurs, midpointOffset, outAndBack, resample, sharedRoad, type LatLng } from "./geo";
 import { decodePolyline } from "./polyline";
 import { requestsAtOnce, routerFetch, routerKnowsStyle } from "./routeServer";
 
@@ -235,8 +235,10 @@ async function computeRoutes(
       ...(p.heading != null ? { heading: Math.round(p.heading), heading_tolerance: 60 } : {}),
       // Generated points: skip residential streets and service roads, where
       // cul-de-sacs are; points that only steer the route snap to proper
-      // through roads (tertiary or better), never a track in a forest.
-      ...(p.movable ? { search_filter: { min_road_class: p.via ? "tertiary" : "unclassified" } } : {}),
+      // through roads (tertiary or better), never a track in a forest. Never
+      // a motorway either: one carriageway goes one way, so reaching a point
+      // there can mean riding on to the next exit and turning round.
+      ...(p.movable ? { search_filter: { min_road_class: p.via ? "tertiary" : "unclassified", max_road_class: "trunk" } } : {}),
     })),
     ...costing(opts),
     ...(alternatives && points.length === 2 ? { alternates: 2 } : {}),
@@ -425,24 +427,20 @@ const UTURN_REACH = 400;
 /**
  * Where the way out to a U-turn at `path[at]` began: walking back from the
  * U-turn, the last point the way back also passes (within
- * SPUR_TOLERANCE_M). Its index in `path`.
+ * SPUR_TOLERANCE_M). Both ways are compared every 20 m, as a straight road
+ * can have its points hundreds of metres apart.
  */
-function retraceStart(path: LatLng[], at: number): number {
-  let start = at;
-  let back = 0;
-  for (let i = at - 1; i >= 0 && back < 20000; i--) {
-    back += distance(path[i], path[i + 1]);
-    let retraced = false;
-    let ahead = 0;
-    for (let j = at + 1; j < path.length && ahead < back + 500; j++) {
-      ahead += distance(path[j - 1], path[j]);
-      if (distance(path[i], path[j]) < SPUR_TOLERANCE_M) {
-        retraced = true;
-        break;
-      }
-    }
-    if (!retraced) break;
-    start = i;
+function retraceStart(path: LatLng[], at: number): LatLng {
+  const out = resample(path.slice(0, at + 1), 20).reverse();
+  const back = resample(path.slice(at), 20);
+  let start = out[0];
+  for (let i = 1, j = 0; i < out.length && i * 20 < 20000; i++) {
+    // The way back passes this point no further on than the way out came (and some).
+    let k = j;
+    while (k < back.length && k <= i + 25 && distance(out[i], back[k]) >= SPUR_TOLERANCE_M) k++;
+    if (k >= back.length || k > i + 25) break;
+    start = out[i];
+    j = Math.max(0, k - 2);
   }
   return start;
 }
@@ -609,7 +607,7 @@ export async function planRoute(
           bestDist = d;
         }
       });
-      if (best > 0) moves.push({ stop: best, to: beforeTurnOff(r.path, r.path[retraceStart(r.path, st.at)]) });
+      if (best > 0) moves.push({ stop: best, to: beforeTurnOff(r.path, retraceStart(r.path, st.at)) });
     });
     return { ...r, warnings: spurs.length ? spurs : turnsAround ? [UTURN_WARNING] : [], ...(moves.length ? { moves } : {}) };
   };
@@ -716,7 +714,7 @@ const THROUGH_ROAD_REACH_M = 300;
 
 /**
  * Where a pin the rider taps or drags lands: a proper road (unclassified or
- * better) if one is within THROUGH_ROAD_REACH_M, so the route doesn't ride
+ * better, short of a motorway) if one is within THROUGH_ROAD_REACH_M, so the route doesn't ride
  * up a cul-de-sac or driveway and back to reach it; otherwise the nearest
  * rideable road. (Holding the map places a pin exactly, for a spot up a
  * side road.) Returns `p` unchanged if there's no road within reach or the
@@ -728,7 +726,7 @@ export async function snapToRoad(p: LatLng, opts: RouteOptions, signal?: AbortSi
     const at = { lat: p.lat, lon: p.lng };
     const res = await routerFetch(
       "/locate",
-      { locations: [{ ...at, search_filter: { min_road_class: "unclassified" } }, at], costing: costing(opts).costing, verbose: false },
+      { locations: [{ ...at, search_filter: { min_road_class: "unclassified", max_road_class: "trunk" } }, at], costing: costing(opts).costing, verbose: false },
       signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeout]) : (signal ?? timeout),
     );
     if (!res.ok) return p;

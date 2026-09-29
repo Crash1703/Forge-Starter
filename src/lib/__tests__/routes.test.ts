@@ -223,7 +223,7 @@ describe("twisty helper points", () => {
     vi.stubGlobal("fetch", fetchMock);
     const [r] = await planRoute([{ pos: start }, { pos: tip, movable: true }, { pos: end }], defaultOptions);
     const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
-    expect(body.locations[1].search_filter).toEqual({ min_road_class: "unclassified" });
+    expect(body.locations[1].search_filter).toEqual({ min_road_class: "unclassified", max_road_class: "trunk" });
     expect(body.locations[0].search_filter).toBeUndefined();
     expect(r.moves).toHaveLength(1);
     expect(r.moves![0].stop).toBe(1);
@@ -238,7 +238,7 @@ describe("twisty helper points", () => {
     await planRoute([{ pos: start }, { pos: destination(start, 90, 8000), via: true, radius: 2000, movable: true }, { pos: end }], defaultOptions);
     const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     expect(body.locations[1].type).toBe("through");
-    expect(body.locations[1].search_filter).toEqual({ min_road_class: "tertiary" });
+    expect(body.locations[1].search_filter).toEqual({ min_road_class: "tertiary", max_road_class: "trunk" });
   });
 
   it("moves a generated point whose dead end stops short of it", async () => {
@@ -625,7 +625,7 @@ describe("snapping a pin to the road", () => {
     // Asks for a proper road and for any road at once.
     expect(JSON.parse(init.body as string)).toMatchObject({
       costing: "motorcycle",
-      locations: [{ lat: paddock.lat, lon: paddock.lng, search_filter: { min_road_class: "unclassified" } }, { lat: paddock.lat, lon: paddock.lng }],
+      locations: [{ lat: paddock.lat, lon: paddock.lng, search_filter: { min_road_class: "unclassified", max_road_class: "trunk" } }, { lat: paddock.lat, lon: paddock.lng }],
     });
   });
 

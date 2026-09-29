@@ -51,6 +51,11 @@ describe("asking GraphHopper in Valhalla's terms", () => {
     for (const c of ["UNCLASSIFIED", "RESIDENTIAL", "SERVICE", "TRACK"]) expect(rule.if).toContain(`road_class == ${c}`);
     expect(rule.multiply_by).toBe("0");
     expect(ghSnapRequest(p, "motorcycle", "unclassified").custom_model.priority[0].if).not.toContain("UNCLASSIFIED");
+    // Short of a motorway: one carriageway goes one way.
+    const offMotorway = ghSnapRequest(p, "motorcycle", "unclassified", "trunk").custom_model.priority[0].if;
+    expect(offMotorway).toContain("road_class == MOTORWAY");
+    expect(offMotorway).not.toContain("road_class == TRUNK");
+    expect(offMotorway).toContain("road_class == RESIDENTIAL");
     // No filter: any road the profile can ride.
     expect(ghSnapRequest(p, "car").custom_model.priority).toEqual([]);
   });
