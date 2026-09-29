@@ -235,7 +235,7 @@ input[type="search"], input:not([type]), .save input, .card input {
 .along-list button:hover { background: var(--field); }
 .along-list strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .along-list small { color: var(--muted); font-variant-numeric: tabular-nums; }
-.poi { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: #fff; border: 2px solid #333; font-size: 0.9rem; box-shadow: 0 1px 4px rgb(0 0 0 / 0.3); }
+.poi { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; padding: 0; background: #fff; border: 2px solid #333; font-size: 0.9rem; box-shadow: 0 1px 4px rgb(0 0 0 / 0.3); cursor: pointer; }
 .poi-fuel { border-color: #0b6e4f; }
 .poi-cafe { border-color: #8a4b1a; }
 .result > .weather, .result > .along { border-top: 1px solid var(--line); padding-top: 12px; }
@@ -530,7 +530,7 @@ button.primary:hover:not(:disabled) { filter: brightness(1.05); }
 .chip-toggle { flex: none; }
 .sight.pass { border-color: #6b4f2a; color: #6b4f2a; }
 .home-pin { color: #fff; }
-.poi { color: #222; }
+.poi { color: #222; min-height: 0; transition: none; }
 .layers-toggles { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
 .layers-toggles .set-row { padding: 8px 10px; min-height: 52px; }
 

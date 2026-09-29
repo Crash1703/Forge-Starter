@@ -65,6 +65,8 @@ interface Props {
   /** Sights to show as photo bubbles. */
   sights?: Sight[];
   onSightClick?: (s: Sight) => void;
+  /** A place along the route (fuel, a café…) was tapped. */
+  onPoiClick?: (p: Poi) => void;
   /** Today's fuel price at a station, where known. */
   priceAt?: (p: LatLng) => { cents: number } | null;
   /** The rider's home, marked with a house. */
@@ -145,6 +147,8 @@ export default function MapView(props: Props) {
   const sightMarkers = useRef<Marker[]>([]);
   const sightClick = useRef(props.onSightClick);
   sightClick.current = props.onSightClick;
+  const poiClick = useRef(props.onPoiClick);
+  poiClick.current = props.onPoiClick;
   // Latest data for each source, so it can be re-applied after a style switch.
   const data = useRef<Record<string, Geo>>({ history: EMPTY, track: EMPTY, alts: EMPTY, route: EMPTY, dots: EMPTY, hover: EMPTY, ride: EMPTY });
   // Handlers change every render; listeners read the latest through this ref.
@@ -394,8 +398,10 @@ export default function MapView(props: Props) {
     const fuelPrices = (props.pois ?? []).flatMap((p) => (p.kind === "fuel" ? [props.priceAt?.(p.position)?.cents] : [])).filter((c): c is number => c != null);
     const cheapestFuel = fuelPrices.length > 1 ? Math.min(...fuelPrices) : NaN;
     poiMarkers.current = (props.ride ? [] : (props.pois ?? [])).map((p) => {
-      const el = document.createElement("div");
+      const el = document.createElement("button");
+      el.type = "button";
       el.className = `poi poi-${p.kind}`;
+      el.setAttribute("aria-label", p.name);
       el.innerHTML = iconSvg(POI_ICONS[p.kind], 16);
       const price = p.kind === "fuel" ? props.priceAt?.(p.position) : null;
       if (price) {
@@ -404,6 +410,12 @@ export default function MapView(props: Props) {
         if (price.cents === cheapestFuel) el.classList.add("cheapest");
       }
       el.title = p.name;
+      // A tap on a place is not a tap on the map (which would add a stop).
+      for (const ev of ["mousedown", "touchstart", "pointerdown", "dblclick"]) el.addEventListener(ev, (e) => e.stopPropagation());
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        poiClick.current?.(p);
+      });
       return new Marker({ element: el }).setLngLat([p.position.lng, p.position.lat]).addTo(m);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
