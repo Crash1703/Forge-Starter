@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { clearFuelPrices, FUEL_CHOICES, loadFuelPrices, type FuelChoice } from "../lib/fuelPrices";
+import { clearFuelPrices, FUEL_CHOICES, loadFuelPrices, pricesAvailable, type FuelChoice } from "../lib/fuelPrices";
 import Icon from "./Icon";
 import { clearMapCache } from "../lib/mapCache";
 import { checkRouteServer, normaliseServer } from "../lib/routeServer";
@@ -133,9 +133,9 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
           </label>
           <label className="set-row token-row">
             <span>
-              <strong>Price token</strong>
+              <strong>Your own price token (optional)</strong>
               <small>
-                Free from{" "}
+                Prices come through Ride Forge's server without one. To ask the government's service directly, use your own, free from{" "}
                 <a href="https://www.fuelpricesqld.com.au/" target="_blank" rel="noreferrer">
                   fuelpricesqld.com.au
                 </a>{" "}
@@ -155,10 +155,10 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
               />
             </span>
           </label>
-          {s.fuelToken && (
+          {pricesAvailable(s.fuelToken) && (
             <div className="set-row">
               <button onClick={() => void checkToken()} disabled={check?.busy}>
-                Check token
+                {s.fuelToken ? "Check token" : "Check prices"}
               </button>
               {check && <small className={check.ok ? "ok-text" : check.busy ? "" : "error-text"}>{check.text}</small>}
             </div>

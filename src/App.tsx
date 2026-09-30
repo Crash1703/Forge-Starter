@@ -17,7 +17,7 @@ import { findLoops as findLoopsAround, type FoundLoop } from "./lib/loopFinder";
 import { lastFallback, requestsAtOnce } from "./lib/routeServer";
 import { applySettings, loadSettings, storeSettings, type Settings } from "./lib/settings";
 import { clearRecentSearches } from "./lib/places";
-import { loadFuelPrices, priceNear, type FuelPrice, type Snapshot } from "./lib/fuelPrices";
+import { loadFuelPrices, priceNear, pricesAvailable, type FuelPrice, type Snapshot } from "./lib/fuelPrices";
 import { MAX_SPAN, SIGHT_NAMES, sightsIn, type Bounds, type Sight } from "./lib/sights";
 import WeatherStrip from "./components/WeatherStrip";
 import StopsAlong from "./components/StopsAlong";
@@ -290,8 +290,8 @@ export default function App() {
   }, [sightsOn, passesOn]);
 
   // Queensland fuel prices, when there are fuel stations to price (or a ride
-  // is on) and the rider has a token; refreshed every 15 minutes.
-  const wantPrices = !!settings.fuelToken && (!!riding || pois.some((p) => p.kind === "fuel"));
+  // is on); refreshed every 15 minutes.
+  const wantPrices = pricesAvailable(settings.fuelToken) && (!!riding || pois.some((p) => p.kind === "fuel"));
   useEffect(() => {
     if (!wantPrices) return;
     let stop = false;
@@ -311,7 +311,7 @@ export default function App() {
     };
   }, [wantPrices, settings.fuelToken]);
   const priceAt = useCallback(
-    (p: LatLng): FuelPrice | null => (fuelData && settings.fuelToken ? priceNear(p, fuelData, settings.fuelType) : null),
+    (p: LatLng): FuelPrice | null => (fuelData && pricesAvailable(settings.fuelToken) ? priceNear(p, fuelData, settings.fuelType) : null),
     [fuelData, settings.fuelToken, settings.fuelType],
   );
 
@@ -1578,7 +1578,7 @@ export default function App() {
                     <StopsAlong
                       route={route}
                       priceAt={priceAt}
-                      priceNote={settings.fuelToken ? fuelNote : "Add a fuel price token in Settings to see Queensland prices."}
+                      priceNote={pricesAvailable(settings.fuelToken) ? fuelNote : "Add a fuel price token in Settings to see Queensland prices."}
                       onPois={setPois}
                       onFocus={(p) => mapRef.current?.easeTo({ center: [p.lng, p.lat], zoom: Math.max(mapRef.current.getZoom(), 14) })}
                     />
