@@ -3,7 +3,7 @@ import Icon, { POI_ICONS } from "./Icon";
 import PlaceSearch from "./PlaceSearch";
 import { distance, formatDistance, type LatLng } from "../lib/geo";
 import { knownPlaces, placesAhead, RIDE_PLACE_KINDS, type RidePlace, type RidePlaceKind } from "../lib/rideStops";
-import type { Poi } from "../lib/pois";
+import type { Poi, PoiKind } from "../lib/pois";
 import { formatPrice, priceAge, type FuelPrice } from "../lib/fuelPrices";
 
 export type AddMode = "via" | "finish";
@@ -23,7 +23,11 @@ interface Props {
   /** The road still ahead. */
   ahead: LatLng[];
   /** Route to the stop; resolves when the new route is in place. */
-  onAdd: (place: { name: string; position: LatLng }, mode: AddMode) => Promise<void>;
+  onAdd: (place: { name: string; position: LatLng; kind: PoiKind | null }, mode: AddMode) => Promise<void>;
+  /** Stops added this ride that are still ahead. */
+  stops?: { id: string; name: string; kind: PoiKind | null; finish: boolean }[];
+  /** Take an added stop back out; resolves when the new route is in place. */
+  onRemove?: (id: string) => Promise<void>;
   onClose: () => void;
   /** Today's fuel price at a station, where known. */
   priceAt?: (p: LatLng) => FuelPrice | null;
@@ -34,13 +38,14 @@ interface Props {
 /**
  * Ride mode's "add a stop": search for anywhere, or pick fuel, food, a
  * lookout or toilets along the road ahead, then stop there on the way or
- * finish there.
+ * finish there. Stops already added are listed first, to take back out.
  */
-export default function RideAddStop({ from, ahead, onAdd, onClose, known = [], priceAt }: Props) {
+export default function RideAddStop({ from, ahead, onAdd, onClose, known = [], priceAt, stops = [], onRemove }: Props) {
   const [kind, setKind] = useState<RidePlaceKind | null>(null);
   const [places, setPlaces] = useState<RidePlace[] | null>(null);
   const [note, setNote] = useState("");
-  const [picked, setPicked] = useState<{ name: string; position: LatLng; where: string } | null>(null);
+  const [picked, setPicked] = useState<{ name: string; position: LatLng; kind: PoiKind | null; where: string } | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -89,6 +94,18 @@ export default function RideAddStop({ from, ahead, onAdd, onClose, known = [], p
     }
   }
 
+  async function remove(id: string) {
+    if (!onRemove) return;
+    setRemoving(id);
+    setNote("");
+    try {
+      await onRemove(id);
+    } catch {
+      setNote("Couldn't find a route without that stop. Try again.");
+    }
+    setRemoving(null);
+  }
+
   return (
     <div className="ride-add" role="dialog" aria-label="Add a stop">
       <div className="ride-add-head">
@@ -118,8 +135,22 @@ export default function RideAddStop({ from, ahead, onAdd, onClose, known = [], p
           <PlaceSearch
             near={from}
             placeholder="Search for a place"
-            onPick={(name, position) => setPicked({ name, position, where: `${formatDistance(distance(from, position))} away` })}
+            onPick={(name, position) => setPicked({ name, position, kind: null, where: `${formatDistance(distance(from, position))} away` })}
           />
+          {stops.length > 0 && (
+            <ol className="ride-add-list ride-add-stops" aria-label="Your stops">
+              {stops.map((s) => (
+                <li key={s.id}>
+                  <Icon name={s.kind ? POI_ICONS[s.kind] : s.finish ? "flag" : "pin"} size={18} />
+                  <strong>{s.name}</strong>
+                  {s.finish && <small>Finish</small>}
+                  <button className="ride-add-remove" disabled={removing != null} aria-label={`Remove ${s.name}`} onClick={() => void remove(s.id)}>
+                    <Icon name="trash" size={18} /> {removing === s.id ? "Removing…" : "Remove"}
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
           <div className="ride-add-kinds" role="radiogroup" aria-label="Find along the road ahead">
             {RIDE_PLACE_KINDS.map((k) => (
               <button
@@ -145,7 +176,7 @@ export default function RideAddStop({ from, ahead, onAdd, onClose, known = [], p
                   <button
                     onClick={() => {
                       const price = kind === "fuel" ? priceAt?.(p.position) : null;
-                      setPicked({ name: p.name, position: p.position, where: `${where(p)}${price ? ` · ${formatPrice(price)}, ${priceAge(price)}` : ""}` });
+                      setPicked({ name: p.name, position: p.position, kind, where: `${where(p)}${price ? ` · ${formatPrice(price)}, ${priceAge(price)}` : ""}` });
                     }}
                   >
                     <strong>{p.name}</strong>

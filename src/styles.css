@@ -446,6 +446,11 @@ a.button { display: inline-flex; align-items: center; padding: 8px 12px; border:
 .ride-add-actions { display: grid; gap: 8px; }
 .ride-add-actions button { min-height: 52px; border-radius: 14px; border: none; background: #2a3039; color: var(--ride-text); font-weight: 700; font-size: 1rem; }
 .ride-add-actions button.primary { background: var(--accent); color: var(--accent-ink); }
+.poi.ride-stop { width: 38px; height: 38px; border-width: 3px; box-shadow: 0 2px 8px rgb(0 0 0 / 0.45); }
+.ride-add-stops li { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 4px 4px 4px 12px; border-radius: 12px; background: #1d222a; }
+.ride-add-stops strong { flex: 1; }
+.ride-add-stops small { color: var(--ride-muted); }
+.ride-add-list .ride-add-remove { width: auto; flex: none; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border-radius: 10px; background: #2a3039; font-weight: 700; }
 .ride-add-retry { min-height: 48px; border-radius: 12px; border: none; background: #2a3039; color: var(--ride-text); font-weight: 700; }
 
 /* Ride mode: pause */

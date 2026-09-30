@@ -6,7 +6,7 @@ import type { FeatureCollection } from "geojson";
 import { distance, pathLength, twistSections, type LatLng } from "../lib/geo";
 import type { RouteResult } from "../lib/routes";
 import type { Stop } from "../lib/storage";
-import type { Poi } from "../lib/pois";
+import type { Poi, PoiKind } from "../lib/pois";
 import { type Sight, type SightKind } from "../lib/sights";
 import { iconSvg, POI_ICONS, type IconName } from "./Icon";
 import { loadMapView, registerMapCache, storeMapView, styleFast, transformRequest } from "../lib/mapCache";
@@ -35,6 +35,10 @@ export interface RideLayer {
   heading: number | null;
   /** Keep the camera on the rider, heading-up. */
   follow: boolean;
+  /** Stops the rider added along the way, drawn as what they are (fuel, café…). */
+  stops?: { id: string; name: string; kind: PoiKind | null; position: LatLng; finish: boolean }[];
+  /** One of those stops was tapped. */
+  onStop?: (id: string) => void;
 }
 
 interface Props {
@@ -507,6 +511,31 @@ export default function MapView(props: Props) {
       });
     }
   }, [props.ride?.position, props.ride?.heading, props.ride?.follow, props.me]);
+
+  // Stops added while riding. Redrawn only when the set of stops changes, not on every fix.
+  const rideStopMarkers = useRef<Marker[]>([]);
+  const rideStops = props.ride?.stops ?? [];
+  const rideStopsKey = rideStops.map((s) => `${s.id}${s.finish ? "f" : ""}`).join();
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    rideStopMarkers.current.forEach((mk) => mk.remove());
+    rideStopMarkers.current = rideStops.map((s) => {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.className = `poi ride-stop${s.kind ? ` poi-${s.kind}` : ""}`;
+      el.setAttribute("aria-label", s.name);
+      el.title = s.name;
+      el.innerHTML = iconSvg(s.kind ? POI_ICONS[s.kind] : s.finish ? "flag" : "pin", 20);
+      for (const ev of ["mousedown", "touchstart", "pointerdown", "dblclick"]) el.addEventListener(ev, (e) => e.stopPropagation());
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        cb.current.ride?.onStop?.(s.id);
+      });
+      return new Marker({ element: el }).setLngLat([s.position.lng, s.position.lat]).addTo(m);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rideStopsKey]);
 
   // Back to a flat north-up map after riding.
   const wasRiding = useRef(false);

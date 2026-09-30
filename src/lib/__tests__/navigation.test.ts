@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { destination, type LatLng } from "../geo";
-import { Announcer, maneuverKind, Navigator, spliceRejoin, spokenDistance, type Fix, type NavRoute } from "../navigation";
+import { Announcer, maneuverKind, Navigator, spliceLeg, spliceRejoin, spokenDistance, type Fix, type NavRoute } from "../navigation";
 import { STOP_TYPE, type Step } from "../routes";
 
 const start = { lat: -26.65, lng: 152.95 };
@@ -117,6 +117,42 @@ describe("spliceRejoin", () => {
     // Hill Road was at 20 in the plan: 10 points after the rejoin point, which is now index 2.
     expect(joined.steps[2].at).toBe(12);
     expect(joined.distance).toBeGreaterThan(2550);
+  });
+});
+
+describe("spliceLeg", () => {
+  it("keeps the ride to an earlier stop, then a new leg, then the rest after the rejoin point", () => {
+    const route = lRoute();
+    route.steps.splice(1, 0, step(STOP_TYPE, 8, "Café"));
+    const leg: NavRoute = {
+      path: [route.path[8], destination(route.path[8], 0, 200), route.path[24]],
+      steps: [step(1, 0, "Head north."), step(15, 1, "Turn right."), step(4, 2, "Arrive.")],
+      distance: 900,
+      duration: 60,
+    };
+    const joined = spliceLeg(route, 3, 8, leg, route, 24);
+    // Points 3–7 of the plan, the leg's three, then 25–30.
+    expect(joined.path.length).toBe(5 + 3 + 6);
+    expect(joined.path[5]).toEqual(route.path[8]);
+    expect(joined.path[7]).toEqual(route.path[24]);
+    expect(joined.steps.map((s) => [s.instruction, s.at])).toEqual([
+      ["Café", 5],
+      ["Head north.", 5],
+      ["Turn right.", 6],
+      ["You have arrived at your destination.", 13],
+    ]);
+    expect(joined.distance).toBeGreaterThan(500 + 900 + 550);
+    expect(joined.distance).toBeLessThan(500 + 900 + 650);
+  });
+
+  it("starts at the rider when the leg starts there", () => {
+    const route = lRoute();
+    const off = destination(route.path[6], 0, 100);
+    const leg: NavRoute = { path: [off, route.path[12]], steps: [step(1, 0, "Head east."), step(4, 1, "Arrive.")], distance: 600, duration: 40 };
+    const joined = spliceLeg(route, 6, 6, leg, route, 12);
+    expect(joined.path[0]).toEqual(off);
+    expect(joined.steps[0].instruction).toBe("Head east.");
+    expect(joined.steps[1]).toMatchObject({ instruction: "Turn right onto Hill Road.", at: 1 + 20 - 12 });
   });
 });
 

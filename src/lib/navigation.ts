@@ -233,6 +233,33 @@ export function spliceRejoin(route: NavRoute, nav: Navigator, target: number, ba
 }
 
 /**
+ * A new route to ride: `head` from path index `start` up to `cut`, then
+ * `leg` (which starts at head.path[cut], or where the rider is when `start`
+ * and `cut` are the same), then `tail` after path index `from` (where the leg
+ * ends). Used to take a stop back out of the route.
+ */
+export function spliceLeg(head: NavRoute, start: number, cut: number, leg: NavRoute, tail: NavRoute, from: number): NavRoute {
+  const hc = new Navigator(head).cum;
+  const tn = new Navigator(tail);
+  const legAt = cut - start;
+  const tailAt = legAt + leg.path.length - 1;
+  const headMetres = hc[cut] - hc[start];
+  const tailMetres = tn.total - tn.cum[from];
+  const headTotal = hc[hc.length - 1] ?? 0;
+  return {
+    path: [...head.path.slice(start, cut), ...leg.path, ...tail.path.slice(from + 1)],
+    steps: [
+      ...head.steps.filter((s) => s.at >= start && (s.at < cut || (s.at === cut && cut > start && s.type === STOP_TYPE)) && !isArrival(s.type)).map((s) => ({ ...s, at: s.at - start })),
+      ...leg.steps.filter((s) => !isArrival(s.type)).map((s) => ({ ...s, at: s.at + legAt })),
+      ...tail.steps.filter((s) => s.at > from).map((s) => ({ ...s, at: s.at - from + tailAt })),
+    ],
+    distance: headMetres + leg.distance + tailMetres,
+    duration:
+      (headTotal > 0 ? (head.duration * headMetres) / headTotal : 0) + leg.duration + (tn.total > 0 ? (tail.duration * tailMetres) / tn.total : 0),
+  };
+}
+
+/**
  * "400 metres", "1.5 kilometres" (or "500 feet", "1.5 miles"): rounded the
  * way a co-rider would say it.
  */
