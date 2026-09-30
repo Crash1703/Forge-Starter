@@ -110,6 +110,23 @@ server's rule, and restart the tunnel:
 It only passes on the three requests the app makes, and keeps each answer
 for a while (prices for 5 minutes).
 
+**Health check (recommended).** Every 5 minutes, `server/health/check.sh`
+asks the route server for a real route, the fuel service for its fuel list,
+and the public address for the server's info. Whatever is stuck gets
+restarted: the route server (unless it started under 5 minutes ago and is
+still loading the map), the fuel service (only if it doesn't answer at all;
+the government's service being down is just noted), and the tunnel (when
+the server works but the public address doesn't).
+```sh
+cp ~/Forge-Starter/server/health/ride-forge-health.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now ride-forge-health.timer
+journalctl --user -u ride-forge-health        # what it found and did
+```
+For a phone notification when something stays down (two checks in a row)
+and when it's back, install the free [ntfy](https://ntfy.sh) app, subscribe
+to a hard-to-guess topic name, and put it in
+`~/.config/ride-forge/health.env` as `NTFY_TOPIC=that-name`.
+
 ## Valhalla
 
 ### What you need
