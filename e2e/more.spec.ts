@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { reports } from "./fakes";
 import { noErrors, openApp, planRoute, shot } from "./helpers";
 
 test.beforeEach(async ({ page }) => openApp(page));
@@ -100,4 +101,21 @@ test("Settings: route server choices, and fuel prices without a token", async ({
   await page.getByRole("button", { name: "Check prices" }).click();
   await expect(page.getByText(/Working: 2 stations, 2 with Premium 95 prices/)).toBeVisible();
   await page.screenshot(shot("16-settings"));
+});
+
+test("send feedback from Settings", async ({ page }) => {
+  await page.getByRole("button", { name: "Settings" }).click();
+  const send = page.getByRole("button", { name: "Send", exact: true });
+  await expect(send).toBeDisabled();
+  await page.locator("#set-feedback").fill("Reverse didn't flip my loop");
+  await send.click();
+  await expect(page.getByText("Thanks! Sent.")).toBeVisible();
+  await expect(page.locator("#set-feedback")).toHaveValue("");
+  const sent = reports.get(page) ?? [];
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({ kind: "feedback", message: "Reverse didn't flip my loop", version: "dev", platform: "web" });
+  // The app's version and phone, never where the rider is.
+  expect(Object.keys(sent[0]).sort()).toEqual(["device", "kind", "message", "platform", "screen", "version"]);
+  await page.locator("#set-feedback").scrollIntoViewIfNeeded();
+  await page.screenshot(shot("17-feedback"));
 });

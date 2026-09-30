@@ -1,0 +1,14 @@
+# systemd user service: feedback and error reports from the app (feedback.mjs),
+# through the route server's tunnel at /feedback/. Copy to ~/.config/systemd/user/.
+[Unit]
+Description=Ride Forge feedback
+After=network-online.target
+
+[Service]
+EnvironmentFile=-%h/.config/ride-forge/health.env
+ExecStart=/usr/bin/node %h/Forge-Starter/server/feedback/feedback.mjs
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

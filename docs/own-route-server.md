@@ -111,6 +111,20 @@ server's rule, and restart the tunnel:
 It only passes on the three requests the app makes, and keeps each answer
 for a while (prices for 5 minutes).
 
+**Feedback and error reports.** The app sends Settings → Send feedback,
+and errors it hits, to `/feedback/report` on the route server's address.
+`server/feedback/feedback.mjs` keeps them in `~/ride-forge-feedback/`
+(one JSON line each, no IP addresses; at most 10 messages and 30 errors an
+hour per sender), and sends a phone notification for each message when
+`NTFY_TOPIC` is set.
+```sh
+cp ~/Forge-Starter/server/feedback/ride-forge-feedback.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now ride-forge-feedback
+~/Forge-Starter/server/feedback/show.sh        # the latest 20
+```
+Send `/feedback/` to it in `~/graphhopper/tunnel.yml`, as for `/fuel/`
+(port 8996).
+
 **Health check (recommended).** Every 5 minutes, `server/health/check.sh`
 asks the route server for a real route, the fuel service for its fuel list,
 and the public address for the server's info. Whatever is stuck gets

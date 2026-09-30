@@ -29,6 +29,7 @@ jobs:
       - run: npm run build
         env:
           VITE_BUILD_ID: ${{ github.sha }}
+          VITE_APP_VERSION: ${{ env.VERSION }}
       - run: npx cap sync android
       - uses: actions/setup-java@v4
         with:
@@ -73,3 +74,5 @@ jobs:
             1. Tap **RideForge-${{ env.VERSION }}.apk** below to download it.
             2. Open the download. If Android asks, allow your browser to install unknown apps.
             3. Tap **Install** (or **Update**). Your saved routes are kept.
+
+            Testing? See [TESTING.md](https://github.com/Crash1703/Forge-Starter/blob/main/TESTING.md), and send problems or ideas from **Settings → Feedback**.
