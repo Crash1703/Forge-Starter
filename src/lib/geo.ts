@@ -280,13 +280,24 @@ export function outAndBack(path: LatLng[], near: LatLng, window = 5000, toleranc
   return (twice.size * step) / 2;
 }
 
+export interface Spur {
+  tip: LatLng;
+  base: LatLng;
+  length: number;
+  from: number;
+  to: number;
+}
+
 /**
  * Every dead-end spur along `path`: a stretch ridden out and straight back
  * along the same road. `tip` is the far end, `base` the junction it leaves
- * from, `length` how far up it goes (metres, one way). Turning circles and
+ * from, `length` how far up it goes (metres, one way). `from` and `to` are
+ * how far along `path` the rider turns up it and gets back to its foot
+ * (metres), so a stop reached anywhere up it counts as up it, even where
+ * the road bends back and the stop is far from the tip. Turning circles and
  * small loops at the end are allowed for.
  */
-export function findSpurs(path: LatLng[], minLength = 100, tolerance = 25): { tip: LatLng; base: LatLng; length: number }[] {
+export function findSpurs(path: LatLng[], minLength = 100, tolerance = 25): Spur[] {
   const step = 20;
   const pts = resample(path, step);
   const n = pts.length;
@@ -305,7 +316,7 @@ export function findSpurs(path: LatLng[], minLength = 100, tolerance = 25): { ti
     for (let k = Math.max(t + 1, j - 3); k <= Math.min(n - 1, j + 3); k++) if (k - i >= 5 && near(pts[i], pts[k])) return k;
     return -1;
   };
-  const out: { tip: LatLng; base: LatLng; length: number }[] = [];
+  const out: Spur[] = [];
   for (let t = 5; t < n - 5; t++) {
     // Try each place as the turn-around, allowing up to ~200 m of turning
     // circle or loop at the end before the two passes line up.
@@ -334,7 +345,7 @@ export function findSpurs(path: LatLng[], minLength = 100, tolerance = 25): { ti
       // The turn-around is the point of the spur furthest along it from the foot.
       let far = t;
       for (let k = best.up; k <= best.down; k++) if (distance(pts[k], pts[best.up]) > distance(pts[far], pts[best.up])) far = k;
-      out.push({ tip: pts[far], base: pts[best.up], length: (best.down - best.up) * step / 2 });
+      out.push({ tip: pts[far], base: pts[best.up], length: (best.down - best.up) * step / 2, from: best.up * step, to: best.down * step });
       t = Math.max(t, best.down); // carry on after the spur
     }
   }

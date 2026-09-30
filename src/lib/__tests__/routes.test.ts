@@ -232,6 +232,58 @@ describe("twisty helper points", () => {
     expect(distance(r.moves![0].to, start)).toBeLessThan(distance(foot, start));
   });
 
+  it("with a style per stop, still moves a generated pin the ride goes up a dead end and back to reach", async () => {
+    // Each section ends at the pin, free to turn round there: only the whole ride shows the dead end.
+    const tip = destination(start, 90, 8000);
+    const foot = destination(tip, 180, 500);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        const first = Math.abs(body.locations[0].lat - start.lat) < 1e-6;
+        return new Response(JSON.stringify({ trip: tripAlong(first ? [start, foot, tip] : [tip, foot, end], 21) }), { status: 200 });
+      }),
+    );
+    const [r] = await planSections([{ pos: start }, { pos: tip, movable: true }, { pos: end }], ["fastest", "fastest"], defaultOptions);
+    expect(r.moves).toHaveLength(1);
+    expect(r.moves![0].stop).toBe(1);
+    expect(distance(r.moves![0].to, foot)).toBeLessThan(120);
+  });
+
+  it("moves a generated pin up a dead end that bends back, far from the spur's tip", async () => {
+    // 4 km south to a turn-off, then 2.5 km back north up a side road to the
+    // pin: the spur's tip (its furthest point) is the turn-off, 2.5 km from the pin.
+    const foot = destination(start, 90, 3000);
+    const turnOff = destination(foot, 180, 4000);
+    const bend = destination(turnOff, 270, 400);
+    const pin = destination(bend, 0, 2500);
+    const withArrival = (pts: { lat: number; lng: number }[]) => ({
+      summary: { length: 10, time: 600 },
+      legs: [
+        {
+          shape: encode6(pts.map((p) => [p.lat, p.lng])),
+          summary: { length: 10, time: 600 },
+          maneuvers: [
+            { type: 1, instruction: "Go.", length: 10, begin_shape_index: 0 },
+            { type: 4, instruction: "Arrive.", length: 0, begin_shape_index: pts.length - 1 },
+          ],
+        },
+      ],
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_u: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        const first = Math.abs(body.locations[0].lat - start.lat) < 1e-6;
+        return new Response(JSON.stringify({ trip: withArrival(first ? [start, foot, turnOff, bend, pin] : [pin, bend, turnOff, foot, end]) }), { status: 200 });
+      }),
+    );
+    const [r] = await planSections([{ pos: start }, { pos: pin, movable: true }, { pos: end }], ["fastest", "fastest"], defaultOptions);
+    expect(r.moves).toHaveLength(1);
+    expect(r.moves![0].stop).toBe(1);
+    expect(distance(r.moves![0].to, foot)).toBeLessThan(120);
+  });
+
   it("snaps points that only steer the route to through roads, not tracks", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ trip: tripAlong([start, end], 20) }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
