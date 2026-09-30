@@ -1,0 +1,10 @@
+# The Ride Forge stress test every night at 3 am Queensland time (17:00 UTC).
+[Unit]
+Description=Ride Forge nightly stress test
+
+[Timer]
+OnCalendar=*-*-* 17:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
