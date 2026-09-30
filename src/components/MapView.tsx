@@ -110,6 +110,57 @@ const PIN_SVG =
 
 type Geo = FeatureCollection;
 const EMPTY: Geo = { type: "FeatureCollection", features: [] };
+
+/**
+ * A little motorbike seen from above, facing right (the way a line runs, so
+ * the map turns it to face along the route): tyres, the bike with a pointed
+ * nose, handlebars, and the rider's shoulders and helmet. Dark with a white
+ * edge, to show on every colour of route. Drawn at twice size for sharp screens.
+ */
+function bikeImage(): ImageData {
+  const w = 34;
+  const h = 18;
+  const c = document.createElement("canvas");
+  c.width = w * 2;
+  c.height = h * 2;
+  const g = c.getContext("2d")!;
+  g.scale(2, 2);
+  const rounded = (x: number, y: number, rw: number, rh: number, r: number) => {
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.arcTo(x + rw, y, x + rw, y + rh, r);
+    g.arcTo(x + rw, y + rh, x, y + rh, r);
+    g.arcTo(x, y + rh, x, y, r);
+    g.arcTo(x, y, x + rw, y, r);
+    g.closePath();
+  };
+  const oval = (cx: number, cy: number, rx: number, ry: number) => (g.beginPath(), g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2));
+  // Each part, grown by `e` for the white edge drawn first.
+  const parts = [
+    (e: number) => rounded(1 - e, 7.3 - e, 8 + 2 * e, 3.4 + 2 * e, 1.7 + e), // rear tyre
+    (e: number) => rounded(25 - e, 7.3 - e, 8 + 2 * e, 3.4 + 2 * e, 1.7 + e), // front tyre
+    (e: number) => oval(15, 9, 9 + e, 3.8 + e), // the bike
+    (e: number) => (g.beginPath(), g.moveTo(20, 5.2 - e), g.lineTo(29.5 + 1.3 * e, 9), g.lineTo(20, 12.8 + e), g.closePath()), // nose
+    (e: number) => rounded(21.5 - e, 3 - e, 2.4 + 2 * e, 12 + 2 * e, 1.2 + e), // handlebars
+  ];
+  for (const [e, colour] of [
+    [1.5, "#fff"],
+    [0, "#1b1f24"],
+  ] as const) {
+    g.fillStyle = colour;
+    for (const p of parts) (p(e), g.fill());
+  }
+  g.fillStyle = "#4a5566"; // shoulders
+  oval(14.5, 9, 3.4, 5.6);
+  g.fill();
+  g.fillStyle = "#1b1f24"; // helmet, white with a dark rim
+  oval(16.2, 9, 3.7, 3.7);
+  g.fill();
+  g.fillStyle = "#fff";
+  oval(16.2, 9, 2.9, 2.9);
+  g.fill();
+  return g.getImageData(0, 0, c.width, c.height);
+}
 const coords = (path: LatLng[]) => path.map((p) => [p.lng, p.lat]);
 const line = (path: LatLng[], properties: Record<string, number> = {}) => ({
   type: "Feature" as const,
@@ -156,7 +207,7 @@ export default function MapView(props: Props) {
   const poiClick = useRef(props.onPoiClick);
   poiClick.current = props.onPoiClick;
   // Latest data for each source, so it can be re-applied after a style switch.
-  const data = useRef<Record<string, Geo>>({ history: EMPTY, track: EMPTY, alts: EMPTY, route: EMPTY, dots: EMPTY, hover: EMPTY, ride: EMPTY });
+  const data = useRef<Record<string, Geo>>({ history: EMPTY, track: EMPTY, alts: EMPTY, route: EMPTY, direction: EMPTY, dots: EMPTY, hover: EMPTY, ride: EMPTY });
   // Handlers change every render; listeners read the latest through this ref.
   const cb = useRef(props);
   cb.current = props;
@@ -192,7 +243,7 @@ export default function MapView(props: Props) {
 
     // Our sources and layers, (re-)added whenever a map style finishes loading.
     m.on("style.load", () => {
-      for (const id of ["history", "track", "alts", "route", "dots", "hover", "ride"]) {
+      for (const id of ["history", "track", "alts", "route", "direction", "dots", "hover", "ride"]) {
         if (!m.getSource(id)) m.addSource(id, { type: "geojson", data: data.current[id] });
       }
       const round = { "line-cap": "round", "line-join": "round" } as const;
@@ -212,6 +263,22 @@ export default function MapView(props: Props) {
         paint: {
           "line-color": ["match", ["get", "level"], 1, TWIST_COLOURS[1], 2, TWIST_COLOURS[2], 3, TWIST_COLOURS[3], TWIST_COLOURS[0]],
           "line-width": 6,
+        },
+      });
+      // Little motorbikes along the route, riding the way it goes (seen from
+      // above, so they read the same whichever way the road runs).
+      if (!m.hasImage("bike")) m.addImage("bike", bikeImage(), { pixelRatio: 2 });
+      add({
+        id: "direction",
+        type: "symbol",
+        source: "direction",
+        layout: {
+          "symbol-placement": "line",
+          "symbol-spacing": 110,
+          "icon-image": "bike",
+          "icon-rotation-alignment": "map",
+          "icon-allow-overlap": true,
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 8, 0.8, 14, 1.1],
         },
       });
       add({ id: "ride-casing", type: "line", source: "ride", layout: round, paint: { "line-color": "#0b3d91", "line-width": 12, "line-opacity": 0.5 } });
@@ -382,6 +449,8 @@ export default function MapView(props: Props) {
       type: "FeatureCollection",
       features: sel ? twistSections(sel.path).map((s) => line(s.path, { level: s.level })) : [],
     });
+    // Riding, the road ahead shows the way; planning, the bikes do.
+    setData("direction", { type: "FeatureCollection", features: sel && !ride && sel.path.length > 1 ? [line(sel.path)] : [] });
     // Pass-through points the twisty planner added, so riders can see why the route bends away.
     setData("dots", points(ride ? [] : (sel?.detours ?? [])));
     // eslint-disable-next-line react-hooks/exhaustive-deps
