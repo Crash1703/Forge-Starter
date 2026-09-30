@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { clearFuelPrices, FUEL_CHOICES, loadFuelPrices, pricesAvailable, type FuelChoice } from "../lib/fuelPrices";
 import Icon from "./Icon";
 import PlaceSearch from "./PlaceSearch";
+import { sendFeedback } from "../lib/feedback";
 import type { LatLng } from "../lib/geo";
 import type { Home } from "../lib/storage";
 import { clearMapCache } from "../lib/mapCache";
@@ -28,6 +29,19 @@ interface Props {
 /** App settings: units, clock, how stops are placed, navigation, history. */
 export default function SettingsScreen({ settings: s, onChange, onClearSearches, onClose, build, home, onSetHome, firstStop, near }: Props) {
   const [homeNote, setHomeNote] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const [feedbackNote, setFeedbackNote] = useState<{ busy?: boolean; ok?: boolean; text: string } | null>(null);
+
+  async function send() {
+    setFeedbackNote({ busy: true, text: "Sending…" });
+    try {
+      await sendFeedback(feedback.trim());
+      setFeedback("");
+      setFeedbackNote({ ok: true, text: "Thanks! Sent." });
+    } catch (e) {
+      setFeedbackNote({ text: (e as Error).message });
+    }
+  }
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...s, [k]: v });
   const [check, setCheck] = useState<{ busy?: boolean; text: string; ok?: boolean } | null>(null);
   const own = s.routeServer !== PUBLIC_ONLY ? s.routeServer : "";
@@ -279,6 +293,36 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
         >
           {mapCleared ? "Saved map data deleted" : "Delete saved map data"}
         </button>
+
+        <h3 className="set-group">Feedback</h3>
+        <div className="rt-rows">
+          <label className="set-row token-row">
+            <span>
+              <strong>Send feedback</strong>
+              <small>
+                Something not right, or an idea? It goes to Ride Forge's server with the app's version and your phone's model, never where you are. The app
+                also reports its own errors there, so they can be fixed.
+              </small>
+              <textarea
+                id="set-feedback"
+                rows={4}
+                maxLength={4000}
+                placeholder="What happened, or what would make Ride Forge better?"
+                value={feedback}
+                onChange={(e) => {
+                  setFeedbackNote(null);
+                  setFeedback(e.target.value);
+                }}
+              />
+            </span>
+          </label>
+          <div className="set-row server-actions">
+            <button onClick={() => void send()} disabled={!feedback.trim() || feedbackNote?.busy}>
+              Send
+            </button>
+            {feedbackNote && <small className={feedbackNote.ok ? "ok-text" : feedbackNote.busy ? "" : "error-text"}>{feedbackNote.text}</small>}
+          </div>
+        </div>
 
         <h3 className="set-group">About</h3>
         <p className="credits">

@@ -18,6 +18,12 @@ export const ROUTE_SERVER_URL: string = env.VITE_ROUTE_SERVER_URL ?? "https://ro
  * Queensland fuel prices through Ride Forge's server, which holds the token
  * (see server/fuel): no rider needs one. Empty: only a rider's own token.
  */
+/** Feedback and error reports, to Ride Forge's server (see server/feedback). Empty: none. */
+export const FEEDBACK_URL: string = env.VITE_FEEDBACK_URL ?? (ROUTE_SERVER_URL ? `${ROUTE_SERVER_URL}/feedback/report` : "");
+/** This app's version, as its Android release is numbered (e.g. "1.123"); "dev" when built by hand. */
+export const APP_VERSION: string = env.VITE_APP_VERSION || "dev";
+/** Where the latest Android release is announced. */
+export const RELEASES_API = "https://api.github.com/repos/Crash1703/Forge-Starter/releases/latest";
 export const FUEL_PRICES_URL: string = env.VITE_FUEL_PRICES_URL ?? (ROUTE_SERVER_URL ? `${ROUTE_SERVER_URL}/fuel` : "");
 export const PHOTON_URL: string = env.VITE_PHOTON_URL || "https://photon.komoot.io";
 export const ELEVATION_URL: string = env.VITE_ELEVATION_URL || "https://api.open-meteo.com/v1/elevation";

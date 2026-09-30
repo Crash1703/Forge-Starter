@@ -15,6 +15,8 @@ import { rideScore, roadFacts, type RoadFacts } from "./lib/rideScore";
 import type { LoopChoice, LoopShape } from "./lib/loopChoice";
 import { findLoops as findLoopsAround, type FoundLoop } from "./lib/loopFinder";
 import { lastFallback, requestsAtOnce } from "./lib/routeServer";
+import { newerRelease, type Update } from "./lib/updates";
+import { APP_VERSION } from "./lib/config";
 import { applySettings, loadSettings, storeSettings, type Settings } from "./lib/settings";
 import { clearRecentSearches } from "./lib/places";
 import { loadFuelPrices, priceNear, pricesAvailable, type FuelPrice, type Snapshot } from "./lib/fuelPrices";
@@ -74,7 +76,8 @@ const STYLES: { id: RouteStyle; name: string; hint: string }[] = [
 ];
 
 /** Short commit ID of this build, shown in the footer so riders can tell whether a refresh picked up an update. */
-const BUILD = (import.meta.env.VITE_BUILD_ID as string | undefined)?.slice(0, 7) || "dev";
+const BUILD = `${APP_VERSION} (${(import.meta.env.VITE_BUILD_ID as string | undefined)?.slice(0, 7) || "dev"})`;
+const UPDATE_DISMISSED = "forge.updateDismissed";
 
 type MapTheme = "auto" | "light" | "dark" | "topo";
 
@@ -181,6 +184,21 @@ export default function App() {
   const [locating, setLocating] = useState(false);
   const [sightsOn, setSightsOn] = useState(false);
   const [passesOn, setPassesOn] = useState(false);
+  /** A newer version of the app to download, unless the rider waved this one away. */
+  const [update, setUpdate] = useState<Update | null>(null);
+  useEffect(() => {
+    newerRelease()
+      .then((u) => {
+        let dismissed = "";
+        try {
+          dismissed = localStorage.getItem(UPDATE_DISMISSED) ?? "";
+        } catch {
+          /* shown again next time */
+        }
+        if (u && u.version !== dismissed) setUpdate(u);
+      })
+      .catch(() => undefined);
+  }, []);
   /** The map's search button has popped out into a search box and the map chips. */
   const [searchOpen, setSearchOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
@@ -2220,6 +2238,26 @@ export default function App() {
             </button>
           )}
         </div>
+        )}
+        {update && !riding && (
+          <div className="update-pill" role="status">
+            <a href={update.url} target="_blank" rel="noreferrer">
+              <Icon name="download" size={16} /> Ride Forge {update.version} is out · Update
+            </a>
+            <button
+              aria-label="Not now"
+              onClick={() => {
+                try {
+                  localStorage.setItem(UPDATE_DISMISSED, update.version);
+                } catch {
+                  /* shown again next time */
+                }
+                setUpdate(null);
+              }}
+            >
+              <Icon name="close" size={14} />
+            </button>
+          </div>
         )}
         {recording.state && (
           <div className={`rec-pill${riding ? " riding" : ""}${recording.state.paused ? " paused" : ""}`} role="status">

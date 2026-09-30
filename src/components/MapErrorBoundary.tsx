@@ -1,4 +1,5 @@
-import { Component, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
+import { reportError } from "../lib/feedback";
 
 /** Keeps the planner usable if the map throws (no WebGL, tile server down). */
 export default class MapErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
@@ -6,6 +7,10 @@ export default class MapErrorBoundary extends Component<{ children: ReactNode },
 
   static getDerivedStateFromError(e: Error) {
     return { error: e.message || "The map stopped working" };
+  }
+
+  componentDidCatch(e: Error, info: ErrorInfo) {
+    reportError(`Map: ${e.message}`, `${e.stack ?? ""}\n${info.componentStack ?? ""}`);
   }
 
   render() {

@@ -74,7 +74,18 @@ if [ -f "$HOME/.config/ride-forge/fuel-token" ]; then
   result "Fuel prices" "$fuel_ok" "the fuel service wasn't answering, so it was restarted"
 fi
 
-# 3. The public address (the tunnel), when the route server itself is answering.
+# 3. Feedback and error reports from the app: restart it if it doesn't answer.
+if systemctl --user is-enabled -q ride-forge-feedback 2>/dev/null; then
+  feedback_ok=1
+  if ! curl -sf -m 10 http://localhost:8996/feedback/health >/dev/null; then
+    say "feedback service: no answer; restarting it"
+    systemctl --user restart ride-forge-feedback
+    feedback_ok=0
+  fi
+  result "Feedback" "$feedback_ok" "the feedback service wasn't answering, so it was restarted"
+fi
+
+# 4. The public address (the tunnel), when the route server itself is answering.
 if [ "$check_public" = 1 ]; then
   if curl -sf -m 20 "$ROUTE_URL/info" | grep -q '"profiles"'; then
     result "Public address" 1 ""

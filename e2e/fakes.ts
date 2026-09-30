@@ -88,8 +88,13 @@ function fuelAnswer(path: string) {
   return { SitePrices: STATIONS.map((st) => ({ SiteId: st.id, FuelId: 5, Price: st.price, TransactionDateUtc: new Date(Date.now() - 3_600_000).toISOString() })) };
 }
 
+/** Feedback and error reports the app sent (to Ride Forge's server), per page. */
+export const reports = new WeakMap<Page, Record<string, unknown>[]>();
+
 /** Answer every outside request the app makes. */
 export async function fakeServices(page: Page) {
+  const sent: Record<string, unknown>[] = [];
+  reports.set(page, sent);
   await page.route(/./, (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -108,6 +113,10 @@ export async function fakeServices(page: Page) {
         return json(route, fakeRoute(body.points));
       }
       if (url.pathname.startsWith("/fuel/")) return json(route, fuelAnswer(url.pathname));
+      if (url.pathname === "/feedback/report") {
+        sent.push(JSON.parse(req.postData() ?? "{}"));
+        return route.fulfill({ status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
+      }
       return json(route, {}, 404);
     }
     // Place search and place names (Photon).
