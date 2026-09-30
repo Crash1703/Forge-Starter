@@ -59,10 +59,31 @@ under [`server/graphhopper`](../server/graphhopper).
    journalctl --user -u ride-forge-tunnel | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1
    ```
    The last command prints the address. It changes whenever the tunnel
-   restarts (say, after a reboot): run that last line again and update it in
-   the app. For an address that never changes, use Tailscale Funnel or a
-   named Cloudflare tunnel, as in
-   [step 3 below](#3-reach-it-from-your-phone-over-https), with port **8989**.
+   restarts (say, after a reboot), and a quick tunnel can also die on its
+   own after a network drop (the service keeps running, but the address
+   stops working and the app quietly uses the public server instead): run
+   that last line again and update it in the app.
+
+   **For an address that never changes**, with a domain on Cloudflare, use a
+   named tunnel. The same service runs it once `~/graphhopper/tunnel.yml`
+   exists:
+   ```sh
+   ~/graphhopper/cloudflared tunnel login          # approve in the browser, pick the domain
+   ~/graphhopper/cloudflared tunnel create ride-forge
+   ~/graphhopper/cloudflared tunnel route dns ride-forge routes.example.com
+   cat > ~/graphhopper/tunnel.yml <<YML
+   tunnel: <the id "create" printed>
+   credentials-file: $HOME/.cloudflared/<that id>.json
+   ingress:
+     - hostname: routes.example.com
+       service: http://localhost:8989
+     - service: http_status:404
+   YML
+   systemctl --user restart ride-forge-tunnel
+   ```
+   The address is then `https://routes.example.com`, through restarts and
+   reboots. (Tailscale Funnel works too, as in
+   [step 3 below](#3-reach-it-from-your-phone-over-https), with port **8989**.)
 4. **In the app**, open **Settings → Route server**, paste the https
    address and tap **Check and use**. It should say
    `Working: GraphHopper 11.0, map from …`.
