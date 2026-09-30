@@ -113,6 +113,22 @@ export async function fakeServices(page: Page) {
         return json(route, fakeRoute(body.points));
       }
       if (url.pathname.startsWith("/fuel/")) return json(route, fuelAnswer(url.pathname));
+      if (url.pathname === "/weather/forecast") {
+        // Mild, dry, with a shower in the afternoon: an hour-by-hour forecast for each place asked about.
+        const n = (url.searchParams.get("latitude") ?? "").split(",").length;
+        const start = Math.floor(Date.now() / 3_600_000) * 3600;
+        const hours = Array.from({ length: 72 }, (_, k) => k);
+        const hourly = {
+          time: hours.map((k) => start + k * 3600),
+          temperature_2m: hours.map((k) => 18 + 5 * Math.sin((k / 24) * 2 * Math.PI)),
+          precipitation_probability: hours.map(() => null),
+          precipitation: hours.map((k) => (k % 24 === 6 ? 1.4 : 0)),
+          wind_speed_10m: hours.map(() => 14),
+          weather_code: hours.map((k) => (k % 24 === 6 ? 80 : 2)),
+        };
+        const one = (i: number) => ({ latitude: i, longitude: i, hourly });
+        return json(route, n === 1 ? one(0) : Array.from({ length: n }, (_, i) => one(i)));
+      }
       if (url.pathname === "/feedback/report") {
         sent.push(JSON.parse(req.postData() ?? "{}"));
         return route.fulfill({ status: 204, headers: { "Access-Control-Allow-Origin": "*" } });

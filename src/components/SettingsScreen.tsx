@@ -329,7 +329,8 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
           Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>{" "}
           contributors · tiles <a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> · routing{" "}
           <a href="https://valhalla.github.io/valhalla/" target="_blank" rel="noreferrer">Valhalla</a> (FOSSGIS) · search{" "}
-          <a href="https://photon.komoot.io" target="_blank" rel="noreferrer">Photon</a> · elevation and weather{" "}
+          <a href="https://photon.komoot.io" target="_blank" rel="noreferrer">Photon</a> · weather{" "}
+          <a href="https://www.met.no/en" target="_blank" rel="noreferrer">MET Norway</a> (CC BY 4.0) · elevation{" "}
           <a href="https://open-meteo.com" target="_blank" rel="noreferrer">Open-Meteo</a> · version {build}
         </p>
         <p className="credits">

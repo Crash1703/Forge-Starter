@@ -7,7 +7,8 @@ export interface WeatherPoint {
   eta: number; // epoch ms
   position: LatLng;
   temp: number; // °C
-  rainChance: number; // %
+  /** % chance of rain, where the forecast gives one (MET Norway doesn't for Australia: then null). */
+  rainChance: number | null;
   rain: number; // mm in that hour
   wind: number; // km/h
   code: number; // WMO weather code
@@ -69,7 +70,7 @@ export async function weatherAlong(
       eta,
       position: p.position,
       temp: h.temperature_2m[k],
-      rainChance: h.precipitation_probability[k] ?? 0,
+      rainChance: h.precipitation_probability[k] ?? null,
       rain: h.precipitation[k],
       wind: h.wind_speed_10m[k],
       code: h.weather_code[k],
@@ -79,7 +80,7 @@ export async function weatherAlong(
 
 /** Rain is likely somewhere on the way: the first such place, or null. */
 export function rainAhead(points: WeatherPoint[]): WeatherPoint | null {
-  return points.find((p) => p.rainChance >= 50 || p.rain >= 0.5) ?? null;
+  return points.find((p) => (p.rainChance ?? 0) >= 50 || p.rain >= 0.5) ?? null;
 }
 
 /** A symbol for a WMO weather code. */

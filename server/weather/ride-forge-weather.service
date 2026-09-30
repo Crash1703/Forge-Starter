@@ -1,0 +1,13 @@
+# systemd user service: weather for the app from MET Norway (weather.mjs),
+# through the route server's tunnel at /weather/. Copy to ~/.config/systemd/user/.
+[Unit]
+Description=Ride Forge weather (MET Norway)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/node %h/Forge-Starter/server/weather/weather.mjs
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

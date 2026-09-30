@@ -67,7 +67,8 @@ export default function WeatherStrip({ route, onHover }: Props) {
         <p className="warning">
           🌧️ Rain likely{" "}
           {rain.at < 1000 ? "at the start" : rain.at >= route.distance - 1000 ? "near the finish" : `about ${formatDistance(rain.at)} in`}{" "}
-          (around {clock(rain.eta)}): {rain.rainChance}% chance{rain.rain >= 0.1 ? `, ${rain.rain.toFixed(1)} mm` : ""}.
+          (around {clock(rain.eta)}):{" "}
+          {[rain.rainChance != null ? `${rain.rainChance}% chance` : "", rain.rain >= 0.1 ? `${rain.rain.toFixed(1)} mm an hour` : ""].filter(Boolean).join(", ")}.
         </p>
       )}
       {points && (
@@ -77,7 +78,7 @@ export default function WeatherStrip({ route, onHover }: Props) {
               key={p.at}
               onPointerEnter={() => onHover(p.position)}
               onPointerLeave={() => onHover(null)}
-              className={p.rainChance >= 50 ? "wet" : undefined}
+              className={(p.rainChance ?? 0) >= 50 || p.rain >= 0.5 ? "wet" : undefined}
             >
               <small>{p.at < 1000 ? "Start" : formatDistance(p.at)}</small>
               <span className="w-icon" aria-hidden>
@@ -85,7 +86,11 @@ export default function WeatherStrip({ route, onHover }: Props) {
               </span>
               <strong>{Math.round(p.temp)}°</strong>
               <small>{clock(p.eta)}</small>
-              <small aria-label={`${p.rainChance}% chance of rain`}>💧{p.rainChance}%</small>
+              {p.rainChance != null ? (
+                <small aria-label={`${p.rainChance}% chance of rain`}>💧{p.rainChance}%</small>
+              ) : (
+                <small aria-label={`${p.rain.toFixed(1)} mm of rain an hour`}>💧{p.rain >= 0.1 ? p.rain.toFixed(1) : "0"}mm</small>
+              )}
               <small aria-label={`Wind ${Math.round(toSpeed(p.wind))} ${speedUnit()}`}>🌬{Math.round(toSpeed(p.wind))}</small>
             </li>
           ))}
