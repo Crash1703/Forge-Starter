@@ -1,13 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { fakeServices } from "./fakes";
+import { addBySearch, noErrors, openApp, shot } from "./helpers";
 
-const shot = (name: string) => ({ path: `e2e/screenshots/${name}.png` });
-
-test.beforeEach(async ({ page }) => {
-  await fakeServices(page);
-  await page.goto("/");
-  await expect(page.locator(".maplibregl-canvas")).toBeVisible();
-});
+test.beforeEach(async ({ page }) => openApp(page));
+test.afterEach(async ({ page }) => noErrors(page));
 
 test("the map loads with just the search button, which pops out", async ({ page }) => {
   const search = page.getByRole("button", { name: "Search and map extras" });
@@ -23,15 +18,6 @@ test("the map loads with just the search button, which pops out", async ({ page 
   await page.getByRole("button", { name: "Close search" }).click();
   await expect(panel).toHaveCount(0);
 });
-
-/** Add a stop through the map's search pop-out. */
-async function addBySearch(page: import("@playwright/test").Page, text: string, name: string) {
-  const open = page.getByRole("button", { name: "Search and map extras" });
-  if (await open.isVisible()) await open.click();
-  await page.locator(".map-search input").fill(text);
-  await page.locator(".map-search .suggestions li", { hasText: name }).first().click();
-  await expect(page.locator(".map-search")).toHaveCount(0);
-}
 
 test("plan a route from two searched places", async ({ page }) => {
   await addBySearch(page, "Mal", "Maleny");

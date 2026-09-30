@@ -70,6 +70,19 @@ export const PLACES = [
   { name: "Midway Cafe", lat: -26.7010, lng: 152.8740 },
 ];
 
+/** Two fuel stations near home in Caloundra, with today's Premium 95 price (tenths of a cent). */
+export const STATIONS = [
+  { id: 1, name: "Shell Caloundra", lat: -26.8002, lng: 153.1178, price: 1999 },
+  { id: 2, name: "BP Caloundra", lat: -26.8061, lng: 153.1262, price: 1899 },
+];
+
+/** The Queensland fuel price service (through Ride Forge's server), for those stations. */
+function fuelAnswer(path: string) {
+  if (path.includes("GetCountryFuelTypes")) return { Fuels: [{ FuelId: 2, Name: "Unleaded" }, { FuelId: 5, Name: "Premium Unleaded 95" }] };
+  if (path.includes("GetFullSiteDetails")) return { S: STATIONS.map((st) => ({ S: st.id, N: st.name, Lat: st.lat, Lng: st.lng })) };
+  return { SitePrices: STATIONS.map((st) => ({ SiteId: st.id, FuelId: 5, Price: st.price, TransactionDateUtc: new Date(Date.now() - 3_600_000).toISOString() })) };
+}
+
 /** Answer every outside request the app makes. */
 export async function fakeServices(page: Page) {
   await page.route(/./, (route) => {
@@ -89,7 +102,7 @@ export async function fakeServices(page: Page) {
         if (body.points_encoded === false) return json(route, { paths: [{ snapped_waypoints: { coordinates: [body.points[0]] } }] });
         return json(route, fakeRoute(body.points));
       }
-      if (url.pathname.startsWith("/fuel/")) return json(route, {}, 404);
+      if (url.pathname.startsWith("/fuel/")) return json(route, fuelAnswer(url.pathname));
       return json(route, {}, 404);
     }
     // Place search and place names (Photon).
@@ -106,8 +119,12 @@ export async function fakeServices(page: Page) {
       return json(route, { elevation: Array.from({ length: n }, (_, i) => 100 + 40 * Math.sin(i / 3)) });
     }
     if (host === "api.open-meteo.com") return json(route, {}, 503);
-    // OpenStreetMap lookups (places along the route, sights): nothing there.
-    if (url.pathname.includes("interpreter")) return json(route, { elements: [] });
+    // OpenStreetMap lookups: the two fuel stations when fuel is asked for, otherwise nothing.
+    if (url.pathname.includes("interpreter")) {
+      const query = decodeURIComponent((req.postData() ?? "").replace(/^data=/, "").replace(/\+/g, " "));
+      const fuel = query.includes('"amenity"="fuel"');
+      return json(route, { elements: fuel ? STATIONS.map((st) => ({ type: "node", id: st.id, lat: st.lat, lon: st.lng, tags: { amenity: "fuel", name: st.name } })) : [] });
+    }
     // Anything else (map tiles, Wikidata…): not needed.
     return route.fulfill({ status: 404, body: "" });
   });

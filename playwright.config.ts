@@ -6,6 +6,8 @@ export default defineConfig({
   testDir: "e2e",
   timeout: 180_000,
   retries: process.env.CI ? 1 : 0,
+  // One at a time locally: the map is drawn without a graphics card, and two at once is too slow.
+  workers: process.env.CI ? undefined : 1,
   reporter: [["list"]],
   use: {
     ...devices["Pixel 7"],

@@ -36,7 +36,7 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
   const [mapCleared, setMapCleared] = useState(false);
 
   /** "" for Ride Forge's own server, PUBLIC_ONLY, or the typed address (checked first). */
-  async function useServer(choice?: string) {
+  async function chooseServer(choice?: string) {
     if (choice != null) {
       setServer("");
       set("routeServer", choice);
@@ -45,7 +45,7 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
     }
     const url = normaliseServer(server);
     setServer(url);
-    if (!url || url === ROUTE_SERVER_URL) return void useServer("");
+    if (!url || url === ROUTE_SERVER_URL) return void chooseServer("");
     setServerCheck({ busy: true, text: "Checking…" });
     try {
       const what = await checkRouteServer(url);
@@ -248,17 +248,17 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
           </label>
           <div className="set-row server-actions">
             {normaliseServer(server) && normaliseServer(server) !== own && (
-              <button onClick={() => void useServer()} disabled={serverCheck?.busy}>
+              <button onClick={() => void chooseServer()} disabled={serverCheck?.busy}>
                 Check and use
               </button>
             )}
             {s.routeServer !== "" && (
-              <button onClick={() => void useServer("")} disabled={serverCheck?.busy}>
+              <button onClick={() => void chooseServer("")} disabled={serverCheck?.busy}>
                 Use Ride Forge's server
               </button>
             )}
             {s.routeServer !== PUBLIC_ONLY && (
-              <button onClick={() => void useServer(PUBLIC_ONLY)} disabled={serverCheck?.busy}>
+              <button onClick={() => void chooseServer(PUBLIC_ONLY)} disabled={serverCheck?.busy}>
                 Public server only
               </button>
             )}
