@@ -964,6 +964,24 @@ export default function App() {
     );
   }
 
+  /**
+   * Home as the start (pin A), to add stops to or make a round trip from:
+   * in front of the plan's stops, in place of a "My location" start.
+   */
+  function startFromHome() {
+    if (!home) return;
+    closePlace();
+    if (atHome(stops[0]?.position)) {
+      flash("The route already starts at home");
+      return;
+    }
+    const rest = stops[0]?.label === "My location" ? stops.slice(1) : stops;
+    setLoopChoices([]);
+    setStops([{ id: newId(), position: home.position, label: home.label }, ...rest]);
+    setCenter(home.position);
+    flash(rest.length ? "Starting from home" : "Starting from home: add stops, or make a round trip");
+  }
+
   /** From where the rider is now to home, as a new ride. */
   function rideHome() {
     if (!home) return;
@@ -2033,7 +2051,12 @@ export default function App() {
               <small>Home</small>
               <strong>{home.label}</strong>
               <div className="button-row">
-                <button className="primary" disabled={locating} onClick={() => rideHome()}>
+                {!atHome(stops[0]?.position) && (
+                  <button className="primary" onClick={() => startFromHome()}>
+                    <Icon name="home" size={18} /> Start from home
+                  </button>
+                )}
+                <button disabled={locating} onClick={() => rideHome()}>
                   <Icon name="navigate" size={18} /> {locating ? "Finding you…" : "Ride home"}
                 </button>
                 {stops.length > 0 && !endsAtHome && (
