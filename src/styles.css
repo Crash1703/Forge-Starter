@@ -419,7 +419,7 @@ a.button { display: inline-flex; align-items: center; padding: 8px 12px; border:
 .menu > button:hover, .menu > label:hover { background: var(--field); }
 
 /* Home */
-.home-pin { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: #111418; color: #fff; font-size: 1.1rem; border: 2px solid #fff; box-shadow: 0 1px 5px rgb(0 0 0 / 0.35); pointer-events: none; }
+.home-pin { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: #111418; color: #fff; font-size: 1.1rem; border: 2px solid #fff; box-shadow: 0 1px 5px rgb(0 0 0 / 0.35); pointer-events: auto; cursor: pointer; padding: 0; }
 .home-card .home-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; }
 .home-card .home-label strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .home-card .button-row { margin-bottom: 10px; }
@@ -535,7 +535,7 @@ button.primary:hover:not(:disabled) { filter: brightness(1.05); }
 .map-chips::-webkit-scrollbar { display: none; }
 .chip-toggle { flex: none; }
 .sight.pass { border-color: #6b4f2a; color: #6b4f2a; }
-.home-pin { color: #fff; }
+.home-pin { color: #fff; min-height: 0; transition: none; }
 .poi { color: #222; min-height: 0; transition: none; }
 .layers-toggles { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
 .layers-toggles .set-row { padding: 8px 10px; min-height: 52px; }

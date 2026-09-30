@@ -75,6 +75,8 @@ interface Props {
   priceAt?: (p: LatLng) => { cents: number } | null;
   /** The rider's home, marked with a house. */
   home?: LatLng | null;
+  /** The house was tapped. */
+  onHomeClick?: () => void;
   onMapClick: (p: LatLng) => void;
   onStopMove: (id: string, p: LatLng) => void;
   /** A long press (or right-click) on the map: place a pin exactly there. */
@@ -465,10 +467,18 @@ export default function MapView(props: Props) {
     homeMarker.current?.remove();
     homeMarker.current = null;
     if (!m || !props.home) return;
-    const el = document.createElement("div");
+    const el = document.createElement("button");
+    el.type = "button";
     el.className = "home-pin";
     el.innerHTML = iconSvg("home", 18);
     el.title = "Home";
+    el.setAttribute("aria-label", "Home");
+    // A tap on the house is not a tap on the map (which would add a stop).
+    for (const ev of ["mousedown", "touchstart", "pointerdown", "dblclick"]) el.addEventListener(ev, (e) => e.stopPropagation());
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!cb.current.ride) cb.current.onHomeClick?.();
+    });
     homeMarker.current = new Marker({ element: el }).setLngLat([props.home.lng, props.home.lat]).addTo(m);
   }, [props.home?.lat, props.home?.lng]);
 
