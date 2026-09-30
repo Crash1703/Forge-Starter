@@ -999,6 +999,53 @@ export default function App() {
     );
   }
 
+  /**
+   * A pin's "Round trip": from the start (or, with no other stop, from where
+   * the rider is) out to the pin and back, as a loop that comes home another
+   * way. From stop A itself there's nowhere to go to, so pick a length instead.
+   */
+  function roundTripTo(stop: Stop) {
+    const ride = (from: Stop) => {
+      setLoopChoices([]);
+      setOptions((o) => ({ ...o, returnToStart: true }));
+      setStops([
+        { ...from, shape: undefined, legStyle: undefined },
+        { ...stop, shape: undefined, legStyle: undefined },
+      ]);
+      setName("");
+      wantFit.current = true;
+    };
+    if (stops[0] && stops[0].id !== stop.id) return ride(stops[0]);
+    if (stops.length > 1) {
+      setStops((ss) => [stop, ...ss.filter((x) => x.id !== stop.id)]);
+      setLoopStart("first");
+      setLoopScreen(true);
+      return;
+    }
+    if (!navigator.geolocation) {
+      flash("Location isn't available here. Add a start point first.");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setMe(p);
+        if (distance(p, stop.position) < 200) {
+          flash("That's where you are: add somewhere to ride to");
+          return;
+        }
+        ride({ id: newId(), position: p, label: "My location" });
+      },
+      () => {
+        setLocating(false);
+        flash("Couldn't get your location");
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }
+
   function locateMe() {
     if (!navigator.geolocation) {
       flash("Location isn't available in this browser");
@@ -1429,11 +1476,7 @@ export default function App() {
                   setOpt("returnToStart", false);
                 }}
                 onMenuOpen={() => setSnap("full")}
-                onRoundTrip={(st) => {
-                  setStops((ss) => [st, ...ss.filter((x) => x.id !== st.id)]);
-                  setLoopStart("first");
-                  setLoopScreen(true);
-                }}
+                onRoundTrip={(st) => roundTripTo(st)}
               />
 
               {stops.length > 1 && (
@@ -1893,9 +1936,7 @@ export default function App() {
             }
             onRoundTrip={() => {
               setStopCardId(null);
-              setStops((ss) => [stopCard.stop, ...ss.filter((x) => x.id !== stopCard.stop.id)]);
-              setLoopStart("first");
-              setLoopScreen(true);
+              roundTripTo(stopCard.stop);
             }}
             onRemove={() => {
               setStopCardId(null);
