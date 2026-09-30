@@ -477,10 +477,59 @@ function beforeTurnOff(path: LatLng[], turnOff: LatLng): LatLng {
   return turnOff;
 }
 
-/** Where the route actually reached stop `n` (its road, which may be some way from the pin). */
-function reachedStop(r: RouteResult, n: number): LatLng | null {
-  const step = r.steps.find((st) => st.type === STOP_TYPE && st.instruction === `Stop ${n}`);
-  return step ? r.path[step.at] : null;
+/**
+ * Generated points (and tapped pins) the route rides up a dead end or makes a
+ * U-turn to reach, with where each should move: to just before the turn-off.
+ * `numbers` numbers the stops as `stopNumbers` does.
+ */
+function deadEndMoves(r: RouteResult, points: RoutePoint[], numbers: number[]): { stop: number; to: LatLng }[] {
+  // Each dead end the route rides up and back, blamed on the generated
+  // point that led it there: a stop reached up it (however far from its
+  // tip: the road may bend back), else the point nearest its tip.
+  const moves: { stop: number; to: LatLng }[] = [];
+  const cum = [0];
+  for (let i = 1; i < r.path.length; i++) cum.push(cum[i - 1] + distance(r.path[i - 1], r.path[i]));
+  // 40 m: the two passes of a dead end can sit on either side of a divided road.
+  for (const spur of findSpurs(r.path, SPUR_METRES, SPUR_TOLERANCE_M)) {
+    let best = -1;
+    let bestDist = MOVE_REACH;
+    points.forEach((p, i) => {
+      if (!(p.movable || p.tapped) || i === 0 || i === points.length - 1 || moves.some((m) => m.stop === i)) return;
+      const at = numbers[i] > 0 ? reachedStopAt(r, numbers[i]) : -1;
+      const reached = at >= 0 ? r.path[at] : null;
+      const up = at >= 0 && cum[at] > spur.from && cum[at] < spur.to;
+      const d = up ? -1 : Math.min(distance(p.pos, spur.tip), distance(reached ?? p.pos, spur.tip));
+      if (d < bestDist) {
+        best = i;
+        bestDist = d;
+      }
+    });
+    if (best > 0) moves.push({ stop: best, to: beforeTurnOff(r.path, spur.base) });
+  }
+  // Each U-turn the router makes (short ones too, which aren't a spur
+  // worth the name) near a generated point: the point moves back to where
+  // the way out and back began, so the route no longer goes up there.
+  r.steps.forEach((st) => {
+    if (st.type !== 12 && st.type !== 13) return;
+    const at = r.path[st.at];
+    let best = -1;
+    let bestDist = UTURN_REACH;
+    points.forEach((p, i) => {
+      if (!(p.movable || p.tapped) || i === 0 || i === points.length - 1 || moves.some((m) => m.stop === i)) return;
+      const d = distance(p.pos, at);
+      if (d < bestDist) {
+        best = i;
+        bestDist = d;
+      }
+    });
+    if (best > 0) moves.push({ stop: best, to: beforeTurnOff(r.path, retraceStart(r.path, st.at)) });
+  });
+  return moves;
+}
+
+/** Path index where the route actually reached stop `n` (its road, which may be some way from the pin); -1 if not found. */
+function reachedStopAt(r: RouteResult, n: number): number {
+  return r.steps.find((st) => st.type === STOP_TYPE && st.instruction === `Stop ${n}`)?.at ?? -1;
 }
 
 /**
@@ -579,42 +628,7 @@ export async function planRoute(
     const spurs = points
       .slice(1, -1)
       .flatMap((p, i) => (numbers[i + 1] > 0 && outAndBack(r.path, p.pos) > SPUR_METRES ? [spurWarning(numbers[i + 1])] : []));
-    // Each dead end the route rides up and back, blamed on the generated
-    // point that led it there: the one it reached nearest the spur's tip.
-    const moves: { stop: number; to: LatLng }[] = [];
-    // 40 m: the two passes of a dead end can sit on either side of a divided road.
-    for (const spur of findSpurs(r.path, SPUR_METRES, SPUR_TOLERANCE_M)) {
-      let best = -1;
-      let bestDist = MOVE_REACH;
-      points.forEach((p, i) => {
-        if (!(p.movable || p.tapped) || i === 0 || i === points.length - 1 || moves.some((m) => m.stop === i)) return;
-        const reached = numbers[i] > 0 ? reachedStop(r, numbers[i]) : null;
-        const d = Math.min(distance(p.pos, spur.tip), distance(reached ?? p.pos, spur.tip));
-        if (d < bestDist) {
-          best = i;
-          bestDist = d;
-        }
-      });
-      if (best > 0) moves.push({ stop: best, to: beforeTurnOff(r.path, spur.base) });
-    }
-    // Each U-turn the router makes (short ones too, which aren't a spur
-    // worth the name) near a generated point: the point moves back to where
-    // the way out and back began, so the route no longer goes up there.
-    r.steps.forEach((st) => {
-      if (st.type !== 12 && st.type !== 13) return;
-      const at = r.path[st.at];
-      let best = -1;
-      let bestDist = UTURN_REACH;
-      points.forEach((p, i) => {
-        if (!(p.movable || p.tapped) || i === 0 || i === points.length - 1 || moves.some((m) => m.stop === i)) return;
-        const d = distance(p.pos, at);
-        if (d < bestDist) {
-          best = i;
-          bestDist = d;
-        }
-      });
-      if (best > 0) moves.push({ stop: best, to: beforeTurnOff(r.path, retraceStart(r.path, st.at)) });
-    });
+    const moves = deadEndMoves(r, points, numbers);
     return { ...r, warnings: spurs.length ? spurs : turnsAround ? [UTURN_WARNING] : [], ...(moves.length ? { moves } : {}) };
   };
   const results = baseRoutes.map((r, i) => withWarnings(toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, [])));
@@ -979,7 +993,12 @@ export async function planSections(
     }
     sections.push(best);
   }
-  return [joinSections(sections)];
+  // Each section ends at a plain stop, free to turn round there, and its own
+  // dead-end fixes only see that section: check the whole ride, so a pin or
+  // shaping point up a dead end moves off it as on a route planned in one go.
+  const joined = joinSections(sections);
+  const moves = deadEndMoves(joined, points, stopNumbers(points));
+  return [moves.length ? { ...joined, moves } : joined];
 }
 
 /** One route from consecutive sections: paths joined, steps renumbered, arrivals mid-way become stops. */
