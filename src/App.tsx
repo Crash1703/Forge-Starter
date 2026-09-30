@@ -2138,7 +2138,7 @@ export default function App() {
         {!riding && homeCard && home && (
           <div className="sight-card" role="dialog" aria-label="Home">
             <div className="sight-body">
-              <small>Home</small>
+              {home.label !== "Home" && <small>Home</small>}
               <strong>{home.label}</strong>
               <div className="button-row">
                 {!atHome(stops[0]?.position) && (
