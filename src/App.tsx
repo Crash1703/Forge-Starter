@@ -190,10 +190,13 @@ export default function App() {
   const [sight, setSight] = useState<Sight | null>(null);
   /** A place along the route (fuel, a café…) whose card is open. */
   const [poiCard, setPoiCard] = useState<Poi | null>(null);
-  /** Close the card of a sight or a place along the route. */
+  /** The house on the map was tapped: its card is open. */
+  const [homeCard, setHomeCard] = useState(false);
+  /** Close the card of a sight, a place along the route, or home. */
   const closePlace = () => {
     setSight(null);
     setPoiCard(null);
+    setHomeCard(false);
   };
   /** The stop whose pin was tapped: its card is open. */
   const [stopCardId, setStopCardId] = useState<string | null>(null);
@@ -953,6 +956,41 @@ export default function App() {
         setCenter(p);
         setLoopScreen(false);
         makeLoop(undefined, false, { id: newId(), position: p, label: "My location" }, place, fitPlace);
+      },
+      () => {
+        setLocating(false);
+        flash("Couldn't get your location");
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }
+
+  /** From where the rider is now to home, as a new ride. */
+  function rideHome() {
+    if (!home) return;
+    if (!navigator.geolocation) {
+      rideTo({ name: home.label, position: home.position });
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setMe(p);
+        if (atHome(p)) {
+          flash("You're already home");
+          return;
+        }
+        closePlace();
+        setLoopChoices([]);
+        setOptions((o) => ({ ...o, returnToStart: false }));
+        setStops([
+          { id: newId(), position: p, label: "My location" },
+          { id: newId(), position: home.position, label: home.label },
+        ]);
+        setName("");
+        wantFit.current = true;
       },
       () => {
         setLocating(false);
@@ -1737,17 +1775,27 @@ export default function App() {
             onSightClick={(x) => {
               setStopCardId(null);
               setPoiCard(null);
+              setHomeCard(false);
               setSight(x);
             }}
             onPoiClick={(x) => {
               setStopCardId(null);
               setSight(null);
+              setHomeCard(false);
               setLoopPick(false);
               setPoiCard(x);
             }}
+            onHomeClick={() => {
+              setStopCardId(null);
+              setSight(null);
+              setPoiCard(null);
+              setLoopPick(false);
+              setHomeCard(true);
+            }}
             onMapClick={(p) => {
-              // With a pin's card open, a tap on the map just closes it.
+              // With a pin's (or home's) card open, a tap on the map just closes it.
               if (stopCardId) setStopCardId(null);
+              else if (homeCard) setHomeCard(false);
               else addStop(p);
             }}
             onMapHold={(p) => {
@@ -1966,6 +2014,42 @@ export default function App() {
                   </button>
                 </div>
               )}
+            </div>
+            <button className="close" aria-label="Close" onClick={() => closePlace()}>
+              ✕
+            </button>
+          </div>
+        )}
+        {!riding && homeCard && home && (
+          <div className="sight-card" role="dialog" aria-label="Home">
+            <div className="sight-body">
+              <small>Home</small>
+              <strong>{home.label}</strong>
+              <div className="button-row">
+                <button className="primary" disabled={locating} onClick={() => rideHome()}>
+                  <Icon name="navigate" size={18} /> {locating ? "Finding you…" : "Ride home"}
+                </button>
+                {stops.length > 0 && !endsAtHome && (
+                  <button
+                    onClick={() => {
+                      closePlace();
+                      goHome();
+                    }}
+                  >
+                    <Icon name="flag" size={18} /> Finish at home
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    closePlace();
+                    setLoopVia(null);
+                    setLoopStart("home");
+                    setLoopScreen(true);
+                  }}
+                >
+                  <Icon name="loop" size={18} /> Loop from home
+                </button>
+              </div>
             </div>
             <button className="close" aria-label="Close" onClick={() => closePlace()}>
               ✕
