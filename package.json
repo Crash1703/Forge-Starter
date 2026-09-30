@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "stress": "vitest run -c vitest.stress.config.ts",
     "typecheck": "tsc -b",
     "android": "npm run build && cap sync android"
   },

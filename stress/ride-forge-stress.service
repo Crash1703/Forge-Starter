@@ -1,0 +1,10 @@
+# systemd user service: one nightly stress test run (stress/nightly.sh),
+# started by ride-forge-stress.timer. Copy both to ~/.config/systemd/user/.
+[Unit]
+Description=Ride Forge nightly stress test
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/ride-forge/health.env
+ExecStart=%h/Forge-Starter/stress/nightly.sh
+TimeoutStartSec=2h

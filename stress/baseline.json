@@ -1,0 +1,27 @@
+{
+  "legs": {
+    "plans": 42,
+    "failed": 0,
+    "uturns": 1,
+    "uturnsBy": {
+      "none": 1
+    },
+    "spurs": 19,
+    "spurMetres": 4840,
+    "longSpurs": 0,
+    "km": 4167
+  },
+  "loops": {
+    "plans": 54,
+    "failed": 0,
+    "uturns": 9,
+    "uturnsBy": {
+      "ownPin": 5,
+      "appPin": 4
+    },
+    "spurs": 36,
+    "spurMetres": 8810,
+    "longSpurs": 0,
+    "km": 5801
+  }
+}
