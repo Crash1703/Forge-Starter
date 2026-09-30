@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
-import { decodeShare, encodeShare, loadHome, normalizeLoop, reverseStops, routePoints, storeHome } from "../storage";
+import { decodeShare, encodeShare, loadHome, normalizeLoop, reverseStops, routePoints, shapeFromRoute, storeHome } from "../storage";
+import { destination, distance, type LatLng } from "../geo";
 import { defaultOptions } from "../routes";
 
 describe("share links", () => {
@@ -119,5 +120,39 @@ describe("home", () => {
     expect(loadHome()).toBeNull();
     localStorage.setItem("forge.home", "not json");
     expect(loadHome()).toBeNull();
+  });
+});
+
+describe("reversing a loop rides the same roads the other way", () => {
+  // Out along the north road to P, back along the south road.
+  const A = { lat: -26.8, lng: 153.1 };
+  const P = destination(A, 90, 10000);
+  const line = (from: LatLng, to: LatLng, side: number) =>
+    Array.from({ length: 21 }, (_, i) => destination(destination(from, 90, (distance(from, to) * i) / 20 * Math.sign(to.lng - from.lng)), 0, i > 0 && i < 20 ? side : 0));
+  const out = line(A, P, 2000);
+  const back = line(P, A, -2000);
+  const path = [...out, ...back.slice(1)];
+  const stops = [
+    { id: "a", label: "A", position: A },
+    { id: "p", label: "P", position: P },
+  ];
+
+  it("pins each leg to its road, then reverses onto the other", () => {
+    const pinned = shapeFromRoute(stops, path, [A, P, A]);
+    // Leg A→P is the north road, P→A the south road.
+    expect(pinned[0].shape!.every((q) => q.lat > A.lat)).toBe(true);
+    expect(pinned[1].shape!.every((q) => q.lat < A.lat)).toBe(true);
+    const reversed = reverseStops(pinned, true);
+    expect(reversed.map((s) => s.id)).toEqual(["a", "p"]);
+    // Now out on the south road and home on the north one.
+    expect(reversed[0].shape!.every((q) => q.lat < A.lat)).toBe(true);
+    expect(reversed[1].shape!.every((q) => q.lat > A.lat)).toBe(true);
+  });
+
+  it("leaves legs that already have shaping points alone", () => {
+    const shaped = [{ ...stops[0], shape: [destination(A, 0, 500)] }, stops[1]];
+    const pinned = shapeFromRoute(shaped, path, [A, P, A]);
+    expect(pinned[0].shape).toEqual(shaped[0].shape);
+    expect(pinned[1].shape).toHaveLength(3);
   });
 });

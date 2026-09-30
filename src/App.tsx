@@ -58,6 +58,7 @@ import {
   newId,
   normalizeLoop,
   reverseStops,
+  shapeFromRoute,
   routePoints,
   storeHome,
   storeSaved,
@@ -1582,10 +1583,13 @@ export default function App() {
                 )}
                 {stops.length > 1 && (
                   <button
-                    onClick={() =>
-                      // On a loop, keep the start and ride the loop the other way round.
-                      setStops((ss) => reverseStops(ss, options.returnToStart))
-                    }
+                    onClick={() => {
+                      // On a loop, keep the start and ride the loop the other way round,
+                      // on the same roads: legs are pinned to the route as planned first.
+                      const loop = options.returnToStart;
+                      const pinned = loop && route?.stopsAt ? shapeFromRoute(stops, route.path, route.stopsAt) : stops;
+                      setStops(reverseStops(pinned, loop));
+                    }}
                   >
                     <Icon name="swap" size={18} /> Reverse
                   </button>
@@ -1855,7 +1859,11 @@ export default function App() {
             history={histories}
             ride={riding ? (rideLayer ?? { ahead: route?.path ?? [], position: null, heading: null, follow: true }) : null}
             onFollowBroken={() => setFollowBreaks((n) => n + 1)}
-            onMapReady={(m) => (mapRef.current = m)}
+            onMapReady={(m) => {
+              mapRef.current = m;
+              // The screen tests read the map's layers (development builds only).
+              if (import.meta.env.DEV) (window as unknown as { forgeMap?: unknown }).forgeMap = m;
+            }}
             sights={sights}
             priceAt={priceAt}
             home={settings.showHome ? (home?.position ?? null) : null}

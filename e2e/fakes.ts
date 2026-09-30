@@ -25,9 +25,14 @@ export function fakeRoute(points: LngLat[]) {
     const n = Math.max(2, Math.round(metres(a, b) / 300));
     for (let k = 1; k <= n; k++) {
       const t = k / n;
-      // A gentle wiggle, so the route isn't a ruler line.
-      const w = k < n ? Math.sin(t * Math.PI * 4) * 0.0015 : 0;
-      pts.push([a[0] + (b[0] - a[0]) * t + w, a[1] + (b[1] - a[1]) * t - w]);
+      // Each leg bows out to its right (about 1 km), so a loop comes home on
+      // a different "road" than it went out on, as real loops do, plus a
+      // gentle wiggle so it isn't a ruler line.
+      const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+      const len = Math.hypot(dx, dy) || 1;
+      const bow = 0.01 * Math.sin(t * Math.PI);
+      const w = Math.sin(t * Math.PI * 6) * 0.001;
+      pts.push([a[0] + dx * t + (dy / len) * bow + w, a[1] + dy * t - (dx / len) * bow - w]);
     }
     stopsAt.push(pts.length - 1);
   }
