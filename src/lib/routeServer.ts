@@ -30,6 +30,10 @@ export function setRouteServer(url: string) {
   graphHopper = false;
 }
 
+/** When the rider's server last didn't answer and the public one was asked instead (ms; 0: never). */
+let fellBackAt = 0;
+export const lastFallback = () => fellBackAt;
+
 /** Whether the rider's GraphHopper server is answering (known once it has been asked). */
 let graphHopper = false;
 
@@ -170,6 +174,7 @@ export async function routerFetch(path: string, body: unknown, signal?: AbortSig
       if (signal?.aborted) throw e;
       // Off, asleep or unreachable: fall through to the public server.
     }
+    fellBackAt = Date.now();
   }
   return fetch(`${VALHALLA_URL}${path}`, { ...init, signal });
 }

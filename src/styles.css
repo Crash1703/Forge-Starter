@@ -519,6 +519,7 @@ button.primary:hover:not(:disabled) { filter: brightness(1.05); }
 .set-group { margin: 8px 2px 0; font-size: 0.95rem; }
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; min-height: 64px; }
 .set-row + .set-row { border-top: 1px solid var(--line); }
+.set-row.server-actions { flex-wrap: wrap; justify-content: flex-start; gap: 8px 12px; }
 .set-row > span { display: grid; gap: 2px; min-width: 0; }
 .set-row small { color: var(--muted); font-size: 0.82rem; line-height: 1.3; }
 .switch { appearance: none; -webkit-appearance: none; flex: none; width: 50px; height: 30px; border-radius: 15px; background: var(--line); position: relative; cursor: pointer; transition: background-color 0.15s; margin: 0; }

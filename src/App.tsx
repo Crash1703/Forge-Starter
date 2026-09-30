@@ -14,7 +14,7 @@ import RideScoreCard from "./components/RideScoreCard";
 import { rideScore, roadFacts, type RoadFacts } from "./lib/rideScore";
 import type { LoopChoice, LoopShape } from "./lib/loopChoice";
 import { findLoops as findLoopsAround, type FoundLoop } from "./lib/loopFinder";
-import { requestsAtOnce } from "./lib/routeServer";
+import { lastFallback, requestsAtOnce } from "./lib/routeServer";
 import { applySettings, loadSettings, storeSettings, type Settings } from "./lib/settings";
 import { clearRecentSearches } from "./lib/places";
 import { loadFuelPrices, priceNear, type FuelPrice, type Snapshot } from "./lib/fuelPrices";
@@ -472,6 +472,7 @@ export default function App() {
         return;
       }
       setBusy(true);
+      const began = Date.now();
       (styles.some(Boolean) ? planSections(points, styles, options, ctrl.signal) : planRoute(points, options, ctrl.signal))
         .then((r) => {
           // A generated loop point the route has to ride up a dead end to
@@ -500,7 +501,10 @@ export default function App() {
             return;
           }
           deadEndFixes.current = 0;
-          rememberRoutes(key, r);
+          // Not worth keeping: the rider's server may answer next time.
+          const fellBack = lastFallback() >= began;
+          if (fellBack) flash("Route server not answering: planned with the free public one");
+          else rememberRoutes(key, r);
           show(r);
           // Pins the app placed (loops, round trips) go where the route
           // actually meets the road, so none sits in a paddock or the water.
