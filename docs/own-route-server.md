@@ -125,6 +125,17 @@ systemctl --user daemon-reload && systemctl --user enable --now ride-forge-feedb
 Send `/feedback/` to it in `~/graphhopper/tunnel.yml`, as for `/fuel/`
 (port 8996).
 
+**Weather.** The app's forecasts come from MET Norway through the server
+(`server/weather/weather.mjs`, port 8997, behind `/weather/`): it names the
+app and a contact in each request, as MET Norway asks, keeps each answer
+until it expires, and answers in the shape Open-Meteo uses. MET Norway is
+free for commercial use with credit (CC BY 4.0), but gives no chance of rain
+for Australia, so the app shows the expected rain in mm instead.
+```sh
+cp ~/Forge-Starter/server/weather/ride-forge-weather.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now ride-forge-weather
+```
+
 **Health check (recommended).** Every 5 minutes, `server/health/check.sh`
 asks the route server for a real route, the fuel service for its fuel list,
 and the public address for the server's info. Whatever is stuck gets

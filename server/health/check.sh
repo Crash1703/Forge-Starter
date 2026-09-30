@@ -85,7 +85,18 @@ if systemctl --user is-enabled -q ride-forge-feedback 2>/dev/null; then
   result "Feedback" "$feedback_ok" "the feedback service wasn't answering, so it was restarted"
 fi
 
-# 4. The public address (the tunnel), when the route server itself is answering.
+# 4. Weather (MET Norway through this server): restart it if it doesn't answer.
+if systemctl --user is-enabled -q ride-forge-weather 2>/dev/null; then
+  weather_ok=1
+  if ! curl -sf -m 10 http://localhost:8997/weather/health >/dev/null; then
+    say "weather service: no answer; restarting it"
+    systemctl --user restart ride-forge-weather
+    weather_ok=0
+  fi
+  result "Weather" "$weather_ok" "the weather service wasn't answering, so it was restarted"
+fi
+
+# 5. The public address (the tunnel), when the route server itself is answering.
 if [ "$check_public" = 1 ]; then
   if curl -sf -m 20 "$ROUTE_URL/info" | grep -q '"profiles"'; then
     result "Public address" 1 ""

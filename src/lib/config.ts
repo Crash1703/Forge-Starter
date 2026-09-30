@@ -30,7 +30,9 @@ export const RELEASES_API = "https://api.github.com/repos/Crash1703/Forge-Starte
 export const FUEL_PRICES_URL: string = env.VITE_FUEL_PRICES_URL ?? (ROUTE_SERVER_URL ? `${ROUTE_SERVER_URL}/fuel` : "");
 export const PHOTON_URL: string = env.VITE_PHOTON_URL || "https://photon.komoot.io";
 export const ELEVATION_URL: string = env.VITE_ELEVATION_URL || "https://api.open-meteo.com/v1/elevation";
-export const FORECAST_URL: string = env.VITE_FORECAST_URL || "https://api.open-meteo.com/v1/forecast";
+/** Weather: MET Norway, through Ride Forge's server (see server/weather), answered as Open-Meteo would. */
+export const FORECAST_URL: string =
+  env.VITE_FORECAST_URL || (env.VITE_ROUTE_SERVER_URL ?? "https://routes.mbcgaming.net") + "/weather/forecast";
 export const OVERPASS_URL: string = env.VITE_OVERPASS_URL || "https://overpass-api.de/api/interpreter";
 /**
  * Another public Overpass server, asked at the same time as the main one:

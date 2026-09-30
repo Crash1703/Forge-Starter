@@ -26,6 +26,11 @@ test("plan a route from two searched places", async ({ page }) => {
   await expect(summary).toContainText("km", { timeout: 20_000 });
   await expect(page.getByRole("button", { name: "Ride", exact: true })).toBeVisible();
   await page.screenshot(shot("03-route"));
+  // The weather along the way (MET Norway, through Ride Forge's server): rain in mm, as it gives no chance of rain here.
+  const weather = page.locator(".weather-strip li");
+  await expect(weather.first()).toBeAttached({ timeout: 20_000 });
+  expect(await weather.count()).toBeGreaterThanOrEqual(2);
+  await expect(weather.first()).toContainText("mm");
 });
 
 test("set home in Settings, then start from home on the map", async ({ page }) => {
