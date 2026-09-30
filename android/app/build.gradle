@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "io.github.crash1703.rideforge"
+    namespace = "net.mbcgaming.rideforge"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "io.github.crash1703.rideforge"
+        applicationId "net.mbcgaming.rideforge"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // CI passes the GitHub build number, so every build installs over the last.

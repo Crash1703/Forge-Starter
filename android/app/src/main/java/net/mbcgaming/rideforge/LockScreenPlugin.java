@@ -1,4 +1,4 @@
-package io.github.crash1703.rideforge;
+package net.mbcgaming.rideforge;
 
 import android.app.Activity;
 import android.os.Build;

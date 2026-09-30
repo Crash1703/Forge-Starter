@@ -1,4 +1,4 @@
-package io.github.crash1703.rideforge;
+package net.mbcgaming.rideforge;
 
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;

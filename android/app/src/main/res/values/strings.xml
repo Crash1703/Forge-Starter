@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">Ride Forge</string>
     <string name="title_activity_main">Ride Forge</string>
-    <string name="package_name">io.github.crash1703.rideforge</string>
-    <string name="custom_url_scheme">io.github.crash1703.rideforge</string>
+    <string name="package_name">net.mbcgaming.rideforge</string>
+    <string name="custom_url_scheme">net.mbcgaming.rideforge</string>
 </resources>
