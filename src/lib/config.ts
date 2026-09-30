@@ -9,6 +9,11 @@ const env = import.meta.env;
 export const MAP_STYLE: string = env.VITE_MAP_STYLE || "https://tiles.openfreemap.org/styles/liberty";
 export const MAP_STYLE_DARK: string = env.VITE_MAP_STYLE_DARK || "https://tiles.openfreemap.org/styles/dark";
 export const VALHALLA_URL: string = env.VITE_VALHALLA_URL || "https://valhalla1.openstreetmap.de";
+/**
+ * Ride Forge's own route server (GraphHopper, Australia), used by default;
+ * the public Valhalla server above steps in when it doesn't answer.
+ */
+export const ROUTE_SERVER_URL: string = env.VITE_ROUTE_SERVER_URL ?? "https://routes.mbcgaming.net";
 export const PHOTON_URL: string = env.VITE_PHOTON_URL || "https://photon.komoot.io";
 export const ELEVATION_URL: string = env.VITE_ELEVATION_URL || "https://api.open-meteo.com/v1/elevation";
 export const FORECAST_URL: string = env.VITE_FORECAST_URL || "https://api.open-meteo.com/v1/forecast";

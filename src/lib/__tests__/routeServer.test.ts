@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VALHALLA_URL } from "../config";
-import { checkRouteServer, normaliseServer, requestsAtOnce, routerFetch, setRouteServer } from "../routeServer";
+import { checkRouteServer, lastFallback, normaliseServer, requestsAtOnce, routerFetch, setRouteServer } from "../routeServer";
 
 const HOME = "https://routes.example.com";
 
@@ -42,9 +42,12 @@ describe("the rider's own route server", () => {
       return new Response("{}");
     });
     vi.stubGlobal("fetch", f);
+    const began = Date.now();
     const res = await routerFetch("/route", {});
     expect(res.ok).toBe(true);
     expect(f.mock.calls.map((c) => String(c[0]))).toEqual([`${HOME}/info`, `${VALHALLA_URL}/route`]);
+    // Noted, so the app can say its route came from the public server.
+    expect(lastFallback()).toBeGreaterThanOrEqual(began);
   });
 
   it("falls back when the tunnel answers but the computer behind it doesn't", async () => {

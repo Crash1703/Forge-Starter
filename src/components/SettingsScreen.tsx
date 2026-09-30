@@ -4,7 +4,8 @@ import { clearFuelPrices, FUEL_CHOICES, loadFuelPrices, type FuelChoice } from "
 import Icon from "./Icon";
 import { clearMapCache } from "../lib/mapCache";
 import { checkRouteServer, normaliseServer } from "../lib/routeServer";
-import type { Settings } from "../lib/settings";
+import { ROUTE_SERVER_URL } from "../lib/config";
+import { PUBLIC_ONLY, type Settings } from "../lib/settings";
 
 interface Props {
   settings: Settings;
@@ -19,18 +20,22 @@ interface Props {
 export default function SettingsScreen({ settings: s, onChange, onClearSearches, onClose, build }: Props) {
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...s, [k]: v });
   const [check, setCheck] = useState<{ busy?: boolean; text: string; ok?: boolean } | null>(null);
-  const [server, setServer] = useState(s.routeServer);
+  const own = s.routeServer !== PUBLIC_ONLY ? s.routeServer : "";
+  const [server, setServer] = useState(own);
   const [serverCheck, setServerCheck] = useState<{ busy?: boolean; text: string; ok?: boolean } | null>(null);
   const [mapCleared, setMapCleared] = useState(false);
 
-  async function useServer() {
-    const url = normaliseServer(server);
-    setServer(url);
-    if (!url) {
-      set("routeServer", "");
+  /** "" for Ride Forge's own server, PUBLIC_ONLY, or the typed address (checked first). */
+  async function useServer(choice?: string) {
+    if (choice != null) {
+      setServer("");
+      set("routeServer", choice);
       setServerCheck(null);
       return;
     }
+    const url = normaliseServer(server);
+    setServer(url);
+    if (!url || url === ROUTE_SERVER_URL) return void useServer("");
     setServerCheck({ busy: true, text: "Checking…" });
     try {
       const what = await checkRouteServer(url);
@@ -164,14 +169,18 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
         <div className="rt-rows">
           <label className="set-row token-row">
             <span>
-              <strong>Your own route server</strong>
+              <strong>Route server</strong>
               <small>
-                {s.routeServer ? `Using ${s.routeServer}. ` : "Using the free public server. "}
-                A GraphHopper or Valhalla server of your own (say, on a computer at home) plans much faster, and GraphHopper picks curvier roads:{" "}
+                {s.routeServer === PUBLIC_ONLY
+                  ? "Using only the free public server. "
+                  : s.routeServer
+                    ? `Using ${s.routeServer}; the free public server steps in if it doesn't answer. `
+                    : `Using Ride Forge's route server (${ROUTE_SERVER_URL.replace(/^https:\/\//, "")}); the free public server steps in if it doesn't answer. `}
+                To use a GraphHopper or Valhalla server of your own, enter its address:{" "}
                 <a href="https://github.com/Crash1703/Forge-Starter/blob/main/docs/own-route-server.md" target="_blank" rel="noreferrer">
                   how to set one up
                 </a>
-                . Leave empty for the public one.
+                .
               </small>
               <input
                 id="set-route-server"
@@ -188,10 +197,22 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
               />
             </span>
           </label>
-          <div className="set-row">
-            <button onClick={() => void useServer()} disabled={serverCheck?.busy || normaliseServer(server) === s.routeServer}>
-              {normaliseServer(server) ? "Check and use" : "Use the public server"}
-            </button>
+          <div className="set-row server-actions">
+            {normaliseServer(server) && normaliseServer(server) !== own && (
+              <button onClick={() => void useServer()} disabled={serverCheck?.busy}>
+                Check and use
+              </button>
+            )}
+            {s.routeServer !== "" && (
+              <button onClick={() => void useServer("")} disabled={serverCheck?.busy}>
+                Use Ride Forge's server
+              </button>
+            )}
+            {s.routeServer !== PUBLIC_ONLY && (
+              <button onClick={() => void useServer(PUBLIC_ONLY)} disabled={serverCheck?.busy}>
+                Public server only
+              </button>
+            )}
             {serverCheck && <small className={serverCheck.ok ? "ok-text" : serverCheck.busy ? "" : "error-text"}>{serverCheck.text}</small>}
           </div>
         </div>

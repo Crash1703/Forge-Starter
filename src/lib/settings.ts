@@ -1,6 +1,7 @@
 import { setDisplayPrefs } from "./geo";
 import { setKeepRecentSearches } from "./places";
 import { FUEL_CHOICES, type FuelChoice } from "./fuelPrices";
+import { ROUTE_SERVER_URL } from "./config";
 import { normaliseServer, setRouteServer } from "./routeServer";
 
 /** The rider's preferences, kept on the device. */
@@ -23,9 +24,18 @@ export interface Settings {
   fuelType: FuelChoice;
   /** The rider's own Queensland fuel price token (kept on this device only). */
   fuelToken: string;
-  /** The rider's own route server (empty: the free public one). */
+  /**
+   * The route server: empty for Ride Forge's own (ROUTE_SERVER_URL),
+   * PUBLIC_ONLY for just the free public one, else the rider's own address.
+   */
   routeServer: string;
 }
+
+/** `routeServer` for "only the free public server". */
+export const PUBLIC_ONLY = "public";
+
+/** The address routes are planned at first ("" for the public server alone). */
+export const routeServerUrl = (s: Settings) => (s.routeServer === PUBLIC_ONLY ? "" : s.routeServer || ROUTE_SERVER_URL);
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
@@ -51,7 +61,12 @@ export function loadSettings(): Settings {
     if (["auto", "24", "12"].includes(raw.clock)) s.clock = raw.clock;
     if (FUEL_CHOICES.some((c) => c.id === raw.fuelType)) s.fuelType = raw.fuelType;
     if (typeof raw.fuelToken === "string") s.fuelToken = raw.fuelToken.trim();
-    if (typeof raw.routeServer === "string") s.routeServer = normaliseServer(raw.routeServer);
+    if (raw.routeServer === PUBLIC_ONLY) s.routeServer = PUBLIC_ONLY;
+    else if (typeof raw.routeServer === "string") {
+      // A quick tunnel's address dies with it: Ride Forge's own server instead.
+      const url = normaliseServer(raw.routeServer);
+      s.routeServer = /\.trycloudflare\.com$/.test(url) || url === ROUTE_SERVER_URL ? "" : url;
+    }
     for (const k of ["smartVias", "energySaving", "keepSearches", "showHome"] as const) if (typeof raw[k] === "boolean") s[k] = raw[k];
     return s;
   } catch {
@@ -77,7 +92,7 @@ export function applyTheme(theme: Settings["theme"]) {
 
 /** Put settings into effect: colours, units and clock, search history, route server. */
 export function applySettings(s: Settings) {
-  setRouteServer(s.routeServer);
+  setRouteServer(routeServerUrl(s));
   applyTheme(s.theme);
   setDisplayPrefs({ units: s.units, clock: s.clock });
   setKeepRecentSearches(s.keepSearches);
