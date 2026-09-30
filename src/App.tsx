@@ -5,7 +5,7 @@ import BottomSheet, { type Snap } from "./components/BottomSheet";
 import TwistGauge from "./components/TwistGauge";
 import RideView from "./components/RideView";
 import RidesPanel from "./components/RidesPanel";
-import Icon, { type IconName } from "./components/Icon";
+import Icon, { POI_ICONS, type IconName } from "./components/Icon";
 import SettingsScreen from "./components/SettingsScreen";
 import StopList from "./components/StopList";
 import RoundTripScreen, { type LoopStart } from "./components/RoundTripScreen";
@@ -21,7 +21,7 @@ import { loadFuelPrices, priceNear, pricesAvailable, type FuelPrice, type Snapsh
 import { MAX_SPAN, SIGHT_NAMES, sightsIn, type Bounds, type Sight } from "./lib/sights";
 import WeatherStrip from "./components/WeatherStrip";
 import StopsAlong from "./components/StopsAlong";
-import { poiKind, type Poi } from "./lib/pois";
+import { poiKind, poisIn, type Poi, type PoiKind } from "./lib/pois";
 import { useRecording } from "./lib/useRecording";
 import { deleteRide, listRides, putRide } from "./lib/rideStore";
 import { trackPath, type RideRecord } from "./lib/recorder";
@@ -164,6 +164,10 @@ export default function App() {
   const [confirmStop, setConfirmStop] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [pois, setPois] = useState<Poi[]>([]);
+  /** Fuel and toilets switched on in the map's search panel, and those found in view. */
+  const [viewKinds, setViewKinds] = useState<PoiKind[]>([]);
+  const [viewPois, setViewPois] = useState<Poi[]>([]);
+  const [viewNote, setViewNote] = useState("");
   const backupInput = useRef<HTMLInputElement>(null);
   const autoRecord = useRef(false);
   const [saved, setSaved] = useState<SavedRoute[]>(loadSaved);
@@ -294,9 +298,62 @@ export default function App() {
     };
   }, [sightsOn, passesOn]);
 
+  // Fuel and toilets in view, re-checked as the map moves (as sights are).
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!viewKinds.length || !m) {
+      setViewPois([]);
+      setViewNote("");
+      return;
+    }
+    let loaded: Bounds | null = null;
+    let ctrl: AbortController | null = null;
+    let timer = 0;
+    const inside = (b: Bounds, o: Bounds) => b.south >= o.south && b.north <= o.north && b.west >= o.west && b.east <= o.east;
+    const what = viewKinds.map((k) => poiKind(k).name.toLowerCase()).join(" and ");
+    const check = () => {
+      const g = m.getBounds();
+      const b = { south: g.getSouth(), west: g.getWest(), north: g.getNorth(), east: g.getEast() };
+      if (b.north - b.south > MAX_SPAN || b.east - b.west > MAX_SPAN) {
+        setViewNote(`Zoom in to see ${what}`);
+        return;
+      }
+      if (loaded && inside(b, loaded)) return;
+      const padLat = (b.north - b.south) * 0.25;
+      const padLng = (b.east - b.west) * 0.25;
+      const want = { south: b.south - padLat, north: b.north + padLat, west: b.west - padLng, east: b.east + padLng };
+      ctrl?.abort();
+      ctrl = new AbortController();
+      setViewNote(`Looking for ${what}…`);
+      poisIn(viewKinds, want, ctrl.signal)
+        .then((found) => {
+          loaded = want;
+          setViewPois(found);
+          setViewNote(found.length ? "" : `No ${what} found here`);
+        })
+        .catch((e: Error) => e.name !== "AbortError" && setViewNote(e.message));
+    };
+    const onMove = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(check, 700);
+    };
+    check();
+    m.on("moveend", onMove);
+    return () => {
+      m.off("moveend", onMove);
+      clearTimeout(timer);
+      ctrl?.abort();
+    };
+  }, [viewKinds]);
+  /** Places on the map: along the route (in the planner), and fuel or toilets in view (not twice). */
+  const mapPois = useMemo(() => {
+    const along = tab === "plan" ? pois : [];
+    return [...along, ...viewPois.filter((v) => !along.some((p) => p.kind === v.kind && distance(p.position, v.position) < 40))];
+  }, [tab, pois, viewPois]);
+
   // Queensland fuel prices, when there are fuel stations to price (or a ride
   // is on); refreshed every 15 minutes.
-  const wantPrices = pricesAvailable(settings.fuelToken) && (!!riding || pois.some((p) => p.kind === "fuel"));
+  const wantPrices = pricesAvailable(settings.fuelToken) && (!!riding || [...pois, ...viewPois].some((p) => p.kind === "fuel"));
   useEffect(() => {
     if (!wantPrices) return;
     let stop = false;
@@ -336,7 +393,7 @@ export default function App() {
           note: [
             poiKind(poiCard.kind).one,
             poiCard.kind === "fuel" && priceAt(poiCard.position) ? `${priceAt(poiCard.position)!.cents.toFixed(1)} c/L` : "",
-            `${formatDistance(poiCard.at)} along the route`,
+            poiCard.at >= 0 ? `${formatDistance(poiCard.at)} along the route` : "",
           ]
             .filter(Boolean)
             .join(" · "),
@@ -1794,7 +1851,7 @@ export default function App() {
             insetTop={riding ? 220 : 0}
             me={me}
             track={selectedTrack}
-            pois={tab === "plan" ? pois : []}
+            pois={mapPois}
             history={histories}
             ride={riding ? (rideLayer ?? { ahead: route?.path ?? [], position: null, heading: null, follow: true }) : null}
             onFollowBroken={() => setFollowBreaks((n) => n + 1)}
@@ -1856,7 +1913,7 @@ export default function App() {
         {!riding && (
           <div className={`map-chips${searchOpen ? " open" : ""}`}>
             <button
-              className={`chip-toggle round${!searchOpen && (sightsOn || passesOn) ? " badged" : ""}`}
+              className={`chip-toggle round${!searchOpen && (sightsOn || passesOn || viewKinds.length > 0) ? " badged" : ""}`}
               aria-label={searchOpen ? "Close search" : "Search and map extras"}
               aria-expanded={searchOpen}
               onClick={() => setSearchOpen((o) => !o)}
@@ -1895,10 +1952,28 @@ export default function App() {
                   >
                     <Icon name="mountain" size={18} /> Passes{passesOn && <Icon name="close" size={16} />}
                   </button>
+                  {(["fuel", "toilets"] as const).map((k) => {
+                    const on = viewKinds.includes(k);
+                    return (
+                      <button
+                        key={k}
+                        className="chip-toggle"
+                        aria-pressed={on}
+                        onClick={() => {
+                          setViewKinds((ks) => (on ? ks.filter((x) => x !== k) : [...ks, k]));
+                          closePlace();
+                        }}
+                      >
+                        <Icon name={POI_ICONS[k]} size={18} /> {poiKind(k).name}
+                        {on && <Icon name="close" size={16} />}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
             {(sightsOn || passesOn) && sightsNote && <span className="chip-note">{sightsNote}</span>}
+            {viewKinds.length > 0 && viewNote && <span className="chip-note">{viewNote}</span>}
           </div>
         )}
         {!riding && layersOpen && (

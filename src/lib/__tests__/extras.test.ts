@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { destination, type LatLng } from "../geo";
 import { rainAhead, weatherAlong, weatherIcon, weatherPlaces } from "../weather";
-import { fuelGaps, placeAlong, poiQuery, POI_KINDS, type Poi } from "../pois";
+import { fuelGaps, placeAlong, poiQuery, poisIn, poisInQuery, POI_KINDS, type Poi } from "../pois";
 
 const start = { lat: -26.7, lng: 152.9 };
 const road = (km: number): LatLng[] => Array.from({ length: km + 1 }, (_, i) => destination(start, 90, i * 1000));
@@ -79,6 +79,31 @@ describe("fuel and cafés", () => {
     expect(fuelGaps([fuel(120)], 300000, 200000)).toEqual([]);
     expect(fuelGaps([fuel(50)], 300000, 200000)).toEqual([{ from: 50000, to: 300000 }]);
     expect(fuelGaps([], 150000, 200000)).toEqual([]);
+  });
+});
+
+describe("fuel and toilets in view", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const box = { south: -26.9, west: 153.0, north: -26.7, east: 153.2 };
+
+  it("asks for each kind inside the box", () => {
+    const q = poisInQuery(["fuel", "toilets"], box);
+    expect(q).toContain('nwr["amenity"="fuel"](-26.9000,153.0000,-26.7000,153.2000);');
+    expect(q).toContain('nwr["amenity"="toilets"](-26.9000,153.0000,-26.7000,153.2000);');
+  });
+
+  it("tells fuel from toilets, names them, and marks them as not along a route", async () => {
+    const elements = [
+      { type: "node", id: 1, lat: -26.8, lon: 153.1, tags: { amenity: "fuel", brand: "Shell" } },
+      { type: "way", id: 2, center: { lat: -26.81, lon: 153.11 }, tags: { amenity: "toilets" } },
+      { type: "node", id: 1, lat: -26.8, lon: 153.1, tags: { amenity: "fuel" } },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ elements }))));
+    const found = await poisIn(["fuel", "toilets"], box);
+    expect(found.map((p) => [p.kind, p.name, p.at])).toEqual([
+      ["fuel", "Shell", -1],
+      ["toilets", "Toilets", -1],
+    ]);
   });
 });
 

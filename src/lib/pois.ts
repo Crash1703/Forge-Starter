@@ -72,6 +72,51 @@ export function placeAlong(elements: OverpassElement[], line: LatLng[], kind: Po
   return out.sort((a, b) => a.at - b.at);
 }
 
+/** A box on the map (degrees). */
+export interface Box {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+}
+
+/** Places of these kinds inside a box on the map. */
+export function poisInQuery(kinds: PoiKind[], b: Box): string {
+  const box = `(${b.south.toFixed(4)},${b.west.toFixed(4)},${b.north.toFixed(4)},${b.east.toFixed(4)})`;
+  const parts = kinds.flatMap((kind) => poiKind(kind).filters.map((f) => `nwr${f}${box};`));
+  return `[out:json][timeout:25];(${parts.join("")});out center tags 400;`;
+}
+
+/**
+ * Places of these kinds on the part of the map in view (not along a route:
+ * `at` is -1).
+ */
+export async function poisIn(kinds: PoiKind[], b: Box, signal?: AbortSignal): Promise<Poi[]> {
+  if (!kinds.length) return [];
+  const out: Poi[] = [];
+  const seen = new Set<string>();
+  for (const e of await overpass(poisInQuery(kinds, b), signal)) {
+    const lat = e.lat ?? e.center?.lat;
+    const lng = e.lon ?? e.center?.lon;
+    const id = `${e.type}/${e.id}`;
+    if (lat == null || lng == null || seen.has(id)) continue;
+    seen.add(id);
+    const tags = e.tags ?? {};
+    const kind = kinds.find((k) => poiKind(k).filters.some((f) => matches(f, tags))) ?? kinds[0];
+    out.push({ id, kind, name: tags.name || tags.brand || tags.operator || poiKind(kind).one, position: { lat, lng }, at: -1 });
+  }
+  return out;
+}
+
+/** Whether tags match one Overpass filter like ["amenity"="fuel"] or ["amenity"~"^(a|b)$"]. */
+function matches(filter: string, tags: Record<string, string>): boolean {
+  const m = /^\["([^"]+)"(=|~)"([^"]+)"\]$/.exec(filter);
+  if (!m) return false;
+  const v = tags[m[1]];
+  if (v == null) return false;
+  return m[2] === "=" ? v === m[3] : new RegExp(m[3]).test(v);
+}
+
 /**
  * Stretches longer than `range` metres with no fuel, counting from the
  * start (assume a full tank) to the finish.
