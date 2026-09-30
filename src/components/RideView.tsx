@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
 import ManeuverIcon from "./ManeuverIcon";
 import RideAddStop, { type AddMode } from "./RideAddStop";
-import type { Poi } from "../lib/pois";
+import type { Poi, PoiKind } from "../lib/pois";
 import type { FuelPrice } from "../lib/fuelPrices";
 import type { RideLayer } from "./MapView";
 import { distance, formatDistance, formatDuration, formatTime, speedUnit, toSpeed, type LatLng } from "../lib/geo";
-import { Announcer, maneuverKind, Navigator, spliceRejoin, type Fix, type NavRoute, type NavState } from "../lib/navigation";
-import { routeBack, routeVia, speedLimits, type RouteOptions, type RouteResult } from "../lib/routes";
+import { Announcer, maneuverKind, Navigator, spliceLeg, spliceRejoin, type Fix, type NavRoute, type NavState } from "../lib/navigation";
+import { routeBack, routeVia, speedLimits, STOP_TYPE, type RouteOptions, type RouteResult } from "../lib/routes";
 import {
   askToShowRideNotification,
   clearOldTurnNotification,
@@ -39,6 +39,41 @@ interface Props {
   onExit: () => void;
 }
 
+/** A stop the rider added mid-ride. */
+interface AddedStop {
+  id: string;
+  name: string;
+  /** Fuel, café…: what it is, for its icon. Null for a searched place. */
+  kind: PoiKind | null;
+  position: LatLng;
+  /** Where the route reaches it, on the road. */
+  at: LatLng;
+  /** Where its detour rejoins the route ("Stop on the way"). */
+  rejoin: LatLng | null;
+  /** "Finish here": the ride as it was before, to go back to if it's removed. */
+  before: { route: NavRoute; from: number; endsHome: boolean } | null;
+}
+
+/** Path index where the route reaches `s`, at or after `from`; -1 if it no longer does. */
+function stopIndex(s: AddedStop, path: LatLng[], from: number): number {
+  for (let i = Math.max(0, from); i < path.length; i++) if (distance(path[i], s.at) < 25) return i;
+  return -1;
+}
+
+/** Path index at or after `from` nearest to `p`. */
+function nearestAfter(path: LatLng[], p: LatLng, from: number): number {
+  let best = Math.min(Math.max(0, from), path.length - 1);
+  let bestD = Infinity;
+  for (let i = best; i < path.length; i++) {
+    const d = distance(path[i], p);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
 const MUTE_KEY = "forge.muted";
 /** Don't ask the router for a way back more often than this. */
 const REROUTE_GAP_MS = 15_000;
@@ -61,6 +96,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
   const [gpsNote, setGpsNote] = useState("Finding your position…");
   const [follow, setFollow] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState<AddedStop[]>([]);
   // "Finish here" turns a loop into a ride that ends somewhere else.
   const [endsHome, setEndsHome] = useState(loop);
   const lastFix = useRef<Fix | null>(null);
@@ -181,7 +217,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
    * A stop picked mid-ride: route from here to it, then (on the way) back
    * onto the route at its nearest point ahead, or (finish) end there.
    */
-  async function addStop(place: { name: string; position: LatLng }, mode: AddMode) {
+  async function addStop(place: { name: string; position: LatLng; kind: PoiKind | null }, mode: AddMode) {
     const f = lastFix.current;
     if (!f) throw new Error("No position yet");
     const n = nav.current;
@@ -202,14 +238,73 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
     const r = await routeVia(f.position, state?.heading ?? null, place, mode === "via" ? path[rejoin] : null, options);
     const leg: NavRoute = { path: r.path, steps: r.steps, distance: r.distance, duration: r.duration };
     const next = mode === "via" && rejoin < path.length - 1 ? spliceRejoin(active.current, n, rejoin, leg) : leg;
+    const reached = r.steps.find((st) => st.type === STOP_TYPE);
+    const stop: AddedStop = {
+      id: `${Date.now()}`,
+      name: place.name,
+      kind: place.kind,
+      position: place.position,
+      at: reached ? r.path[reached.at] : r.path[r.path.length - 1],
+      rejoin: mode === "via" ? path[rejoin] : null,
+      before: mode === "finish" ? { route: active.current, from: here, endsHome } : null,
+    };
+    setAdded((a) => [...a, stop]);
+    rideOn(next, mode === "via" && endsHome, f);
+    setAdding(false);
+    say(mode === "via" ? `Added a stop at ${place.name}.` : `Heading to ${place.name}.`);
+  }
+
+  /**
+   * Take an added stop back out: from the stop before it (or from here), go
+   * straight to where its detour rejoined the route. A "Finish here" stop
+   * goes back to the ride as it was before it was added.
+   */
+  async function removeStop(id: string) {
+    const x = added.find((s) => s.id === id);
+    const f = lastFix.current;
+    if (!x) return;
+    if (!f) throw new Error("No position yet");
+    const n = nav.current;
+    const route = active.current;
+    const path = route.path;
+    const here = state ? n.indexAt(state.along) : n.closestIndex(f.position);
+    const sx = stopIndex(x, path, here);
+    const rest = added.filter((s) => s !== x);
+    if (sx < 0) {
+      // Already passed, or no longer on the route.
+      setAdded(rest);
+      return;
+    }
+    // The last of the rider's other stops before this one, if any: keep riding to it first.
+    let anchor = -1;
+    for (const s of rest) {
+      const i = stopIndex(s, path, here);
+      if (i >= 0 && i < sx && i > anchor) anchor = i;
+    }
+    let tail = route;
+    let from: number;
+    if (x.before) {
+      tail = x.before.route;
+      from = nearestAfter(tail.path, x.position, x.before.from);
+    } else from = nearestAfter(path, x.rejoin ?? path[path.length - 1], sx + 1);
+    const leg =
+      anchor >= 0
+        ? await routeBack(path[anchor], null, tail.path[from], options)
+        : await routeBack(f.position, state?.heading ?? null, tail.path[from], options);
+    const cut = anchor >= 0 ? anchor : here;
+    const next = spliceLeg(route, Math.min(here, cut), cut, { path: leg.path, steps: leg.steps, distance: leg.distance, duration: leg.duration }, tail, from);
+    setAdded(rest);
+    rideOn(next, x.before ? x.before.endsHome : endsHome, f);
+    say(`Removed ${x.name}.`);
+  }
+
+  /** Ride `next` from now on. */
+  function rideOn(next: NavRoute, home: boolean, f: Fix) {
     active.current = next;
     nav.current = new Navigator(next);
-    const home = mode === "via" && endsHome;
     setEndsHome(home);
     talk.current = new Announcer(home, true);
     loadLimits(next);
-    setAdding(false);
-    say(mode === "via" ? `Added a stop at ${place.name}.` : `Heading to ${place.name}.`);
     setState(nav.current.update(f));
   }
 
@@ -234,15 +329,26 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
     }
   }
 
-  // Tell the map what to draw: the road ahead and where you are.
+  // The added stops still ahead on the route.
+  const here = state ? nav.current.indexAt(state.along) : 0;
+  const stopsAhead = added.filter((s) => stopIndex(s, active.current.path, here) >= 0);
+
+  // Tell the map what to draw: the road ahead, the stops added, and where you are.
   useEffect(() => {
     const n = nav.current;
     const path = active.current.path;
     const from = state ? n.indexAt(state.along) : 0;
     const ahead: LatLng[] = state ? [state.snapped, ...path.slice(from)] : path;
-    onLayer({ ahead, position: state?.snapped ?? fix?.position ?? null, heading: state?.heading ?? null, follow });
+    onLayer({
+      ahead,
+      position: state?.snapped ?? fix?.position ?? null,
+      heading: state?.heading ?? null,
+      follow,
+      stops: stopsAhead.map((s) => ({ id: s.id, name: s.name, kind: s.kind, position: s.position, finish: !!s.before })),
+      onStop: () => !pausedRef.current && setAdding(true),
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, follow]);
+  }, [state, follow, added]);
 
   const steps = active.current.steps;
   const next = state ? steps[state.step] : steps[0];
@@ -330,6 +436,8 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
           from={state?.snapped ?? fix?.position ?? route.path[0]}
           ahead={state ? active.current.path.slice(n.indexAt(state.along)) : active.current.path}
           onAdd={addStop}
+          stops={stopsAhead.map((s) => ({ id: s.id, name: s.name, kind: s.kind, finish: !!s.before }))}
+          onRemove={removeStop}
           known={knownPlaces}
           priceAt={priceAt}
           onClose={() => setAdding(false)}
