@@ -155,6 +155,9 @@ export function ghRouteRequest(body: ValhallaRouteBody) {
     // point to loop round a block, or finds no route at all, and on a
     // loop's points (already snapped onto through roads) it isn't needed.
     // A dead end ridden up and back is still caught (planRoute's spurs).
+    // Measured again on 30 Sep 2026 with 600 s U-turns (stress tests, pass
+    // through at every stop that asks for it): U-turns 9 → 8, but riding up
+    // side roads and back 8.8 → 13 km, with 4 new spurs over 1 km.
     pass_through: false,
     custom_model: styleModel(body),
     "ch.disable": true,

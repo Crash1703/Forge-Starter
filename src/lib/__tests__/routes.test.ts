@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { destination, distance } from "../geo";
-import { costing, defaultOptions, planRoute, planSections, routeVia, slowestAllowed, snapToRoad, spurWarning, toResult, UTURN_WARNING, type ValhallaTrip } from "../routes";
+import { costing, defaultOptions, planRoute, planSections, routeVia, slowestAllowed, snapToRoad, spurWarning, toResult, uturnAtStopWarning, UTURN_WARNING, type ValhallaTrip } from "../routes";
 
 /** Encode points as a precision-6 polyline, the format Valhalla returns. */
 function encode6(pts: [number, number][]): string {
@@ -282,6 +282,57 @@ describe("twisty helper points", () => {
     expect(r.moves).toHaveLength(1);
     expect(r.moves![0].stop).toBe(1);
     expect(distance(r.moves![0].to, foot)).toBeLessThan(120);
+  });
+
+  describe("a U-turn right at a pin", () => {
+    // East along a through road to the pin, a U-turn there, 60 m back (too
+    // short to be a spur) and off south to the finish.
+    const pin = destination(start, 90, 5000);
+    const back = destination(pin, 270, 60);
+    const trip = {
+      summary: { length: 10, time: 600 },
+      legs: [
+        {
+          shape: encode6([start, destination(start, 90, 2500), pin].map((p) => [p.lat, p.lng])),
+          summary: { length: 5, time: 300 },
+          maneuvers: [
+            { type: 1, instruction: "Head east.", length: 5, begin_shape_index: 0 },
+            { type: 5, instruction: "Stop.", length: 0, begin_shape_index: 2 },
+          ],
+        },
+        {
+          shape: encode6([pin, back, destination(back, 180, 4000), end].map((p) => [p.lat, p.lng])),
+          summary: { length: 5, time: 300 },
+          maneuvers: [
+            { type: 12, instruction: "Make a U-turn.", length: 0.06, begin_shape_index: 0 },
+            { type: 10, instruction: "Turn right.", length: 4, begin_shape_index: 1 },
+            { type: 4, instruction: "Arrive.", length: 0, begin_shape_index: 3 },
+          ],
+        },
+      ],
+    };
+    const plan = (p: { tapped?: boolean; movable?: boolean }) => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ trip }), { status: 200 })));
+      return planRoute([{ pos: start }, { pos: pin, ...p }, { pos: end }], defaultOptions);
+    };
+
+    it("offers to move the rider's tapped pin back, and says the route turns around there", async () => {
+      const [r] = await plan({ tapped: true });
+      expect(r.moves?.map((m) => m.stop)).toEqual([1]);
+      expect(r.warnings).toContain(uturnAtStopWarning(1));
+    });
+
+    it("once the pin stays put (not tapped), just says so", async () => {
+      const [r] = await plan({});
+      expect(r.moves ?? []).toEqual([]);
+      expect(r.warnings).toContain(uturnAtStopWarning(1));
+    });
+
+    it("says nothing about a pin the app placed (it's moved instead)", async () => {
+      const [r] = await plan({ movable: true });
+      expect(r.moves?.map((m) => m.stop)).toEqual([1]);
+      expect(r.warnings).not.toContain(uturnAtStopWarning(1));
+    });
   });
 
   it("snaps points that only steer the route to through roads, not tracks", async () => {
