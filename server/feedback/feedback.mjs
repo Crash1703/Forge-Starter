@@ -4,7 +4,7 @@
 // error the app hit. Each goes on a line of ~/ride-forge-feedback/<YYYY-MM>.jsonl
 // (no IP addresses kept); read them with server/feedback/show.sh. Messages
 // (not errors) also send a phone notification when NTFY_TOPIC is set.
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
 
@@ -15,6 +15,15 @@ const MAX_BYTES = 16_000;
 const PER_HOUR = { feedback: 10, error: 30 };
 const PER_DAY = 1000;
 mkdirSync(DIR, { recursive: true });
+
+/** The privacy policy promises at most 2 years: months older than that are deleted, at start and daily. */
+function forgetOld() {
+  const d = new Date();
+  const oldest = `${d.getUTCFullYear() - 2}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  for (const f of readdirSync(DIR)) if (/^\d{4}-\d{2}\.jsonl$/.test(f) && f.slice(0, 7) < oldest) rmSync(`${DIR}/${f}`);
+}
+forgetOld();
+setInterval(forgetOld, 24 * 3_600_000);
 
 const recent = new Map(); // sender|kind → times (ms)
 let today = { day: "", count: 0 };

@@ -22,6 +22,9 @@ export const ROUTE_SERVER_URL: string = env.VITE_ROUTE_SERVER_URL ?? "https://ro
 export const FEEDBACK_URL: string = env.VITE_FEEDBACK_URL ?? (ROUTE_SERVER_URL ? `${ROUTE_SERVER_URL}/feedback/report` : "");
 /** This app's version, as its Android release is numbered (e.g. "1.123"); "dev" when built by hand. */
 export const APP_VERSION: string = env.VITE_APP_VERSION || "dev";
+/** The privacy policy and terms of use (published with the website, from public/). */
+export const PRIVACY_URL = "https://crash1703.github.io/Forge-Starter/privacy.html";
+export const TERMS_URL = "https://crash1703.github.io/Forge-Starter/terms.html";
 /** Where the latest Android release is announced. */
 export const RELEASES_API = "https://api.github.com/repos/Crash1703/Forge-Starter/releases/latest";
 export const FUEL_PRICES_URL: string = env.VITE_FUEL_PRICES_URL ?? (ROUTE_SERVER_URL ? `${ROUTE_SERVER_URL}/fuel` : "");
