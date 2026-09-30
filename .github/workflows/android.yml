@@ -35,9 +35,24 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
+      # The release key, from GitHub secrets (never in the repo).
+      - name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/ride-forge-release.keystore"
       - name: Build APK
         working-directory: android
+        env:
+          RIDE_FORGE_KEYSTORE: ${{ runner.temp }}/ride-forge-release.keystore
+          RIDE_FORGE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          RIDE_FORGE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: ./gradlew assembleRelease -PversionCode=${{ github.run_number }} -PversionName=$VERSION
+      # Signed with the release key (not the old one, not unsigned), or no release.
+      - name: Check the signature
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs android/app/build/outputs/apk/release/app-release.apk | tee signature.txt
+          grep -q "CN=Ride Forge, O=Ride Forge, C=AU" signature.txt
       - run: cp android/app/build/outputs/apk/release/app-release.apk RideForge-$VERSION.apk
       - uses: actions/upload-artifact@v4
         with:

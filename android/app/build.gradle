@@ -17,24 +17,26 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Releases are signed with Ride Forge's private key, one fixed key so
+    // each new APK installs as an update over the last (Android refuses an
+    // update signed with another key). The key never goes in the repo: the
+    // build gets it from GitHub secrets (see .github/workflows/android.yml)
+    // through these environment variables; a copy is kept safe off GitHub.
+    // Without them (a build on your own computer), the release is unsigned.
+    def releaseKey = System.getenv("RIDE_FORGE_KEYSTORE")
     signingConfigs {
-        // One fixed key so each new APK installs as an update over the last:
-        // Android refuses updates signed with a different key. It lives in the
-        // repo because this app is sideloaded, not sold; swap it for a secret
-        // (and a new applicationId) before publishing on the Play Store.
-        rideForge {
-            storeFile file("ride-forge.keystore")
-            storePassword "rideforge"
-            keyAlias "rideforge"
-            keyPassword "rideforge"
+        if (releaseKey) {
+            rideForge {
+                storeFile file(releaseKey)
+                storePassword System.getenv("RIDE_FORGE_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("RIDE_FORGE_KEY_ALIAS")
+                keyPassword System.getenv("RIDE_FORGE_KEYSTORE_PASSWORD")
+            }
         }
     }
     buildTypes {
-        debug {
-            signingConfig signingConfigs.rideForge
-        }
         release {
-            signingConfig signingConfigs.rideForge
+            if (releaseKey) signingConfig signingConfigs.rideForge
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
