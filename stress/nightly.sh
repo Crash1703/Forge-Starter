@@ -23,9 +23,9 @@ cd "$WORK"
 # Reinstall only when the dependencies changed.
 if ! cmp -s package-lock.json node_modules/.package-lock.json 2>/dev/null; then npm ci --no-audit --no-fund -s; fi
 
-STRESS_OUT="$STATE/$day.json" npm run -s stress >"$STATE/$day.log" 2>&1
+NO_COLOR=1 STRESS_OUT="$STATE/$day.json" npm run -s stress >"$STATE/$day.log" 2>&1
 status=$?
-grep -E "^(loops|legs)( baseline)?:" "$STATE/$day.log"
+grep -oE "(loops|legs)( baseline)?: .*" "$STATE/$day.log"
 if [ "$status" -ne 0 ]; then
   worse=$(grep -oE "AssertionError: [^:]+" "$STATE/$day.log" | sed 's/AssertionError: //' | sort -u | paste -sd, -)
   echo "WORSE than the baseline: ${worse:-see $STATE/$day.log}"
