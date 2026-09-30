@@ -915,8 +915,7 @@ export default function App() {
   /** "Home": start from home on an empty plan, otherwise ride home at the end. */
   function goHome() {
     if (!home) {
-      setTab("saved");
-      setSnap("full");
+      setSettingsOpen(true);
       flash("Set your home first");
       return;
     }
@@ -1683,38 +1682,6 @@ export default function App() {
           />
         ) : (
           <div className="scroll">
-            <section className="home-card">
-              <h2>Home</h2>
-              {home ? (
-                <p className="home-label">
-                  <strong>{home.label}</strong>
-                  <button className="link" onClick={() => setHome(null)}>
-                    Remove
-                  </button>
-                </p>
-              ) : (
-                <p className="hint">Set your home to start loops from it and ride home in one tap.</p>
-              )}
-              <div className="button-row">
-                {stops[0] && (
-                  <button onClick={() => setHome({ label: stops[0].label === "My location" ? "Home" : stops[0].label, position: stops[0].position })}>
-                    Use stop A
-                  </button>
-                )}
-                <button
-                  onClick={() =>
-                    navigator.geolocation?.getCurrentPosition(
-                      (pos) => setHome({ label: "Home", position: { lat: pos.coords.latitude, lng: pos.coords.longitude } }),
-                      () => flash("Couldn't get your location"),
-                      { enableHighAccuracy: true, timeout: 10000 },
-                    )
-                  }
-                >
-                  <Icon name="locate" size={18} /> Where I am now
-                </button>
-              </div>
-              <PlaceSearch near={home?.position ?? center} placeholder="Search for your home address" onPick={(label, p) => setHome({ label, position: p })} />
-            </section>
             <section>
               <button className="wide" onClick={() => fileInput.current?.click()}>
                 <Icon name="up" size={18} /> Import GPX
@@ -1884,7 +1851,7 @@ export default function App() {
                 <label className="set-row">
                   <span>
                     <strong>Home</strong>
-                    <small>{home ? home.label : "Set it in the Saved tab"}</small>
+                    <small>{home ? home.label : "Set it in Settings"}</small>
                   </span>
                   <input
                     type="checkbox"
@@ -2126,6 +2093,10 @@ export default function App() {
             }}
             onClose={() => setSettingsOpen(false)}
             build={BUILD}
+            home={home}
+            onSetHome={setHome}
+            firstStop={stops[0] ?? null}
+            near={center}
           />
         )}
         {loopScreen && (

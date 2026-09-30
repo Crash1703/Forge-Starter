@@ -2,6 +2,9 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { clearFuelPrices, FUEL_CHOICES, loadFuelPrices, pricesAvailable, type FuelChoice } from "../lib/fuelPrices";
 import Icon from "./Icon";
+import PlaceSearch from "./PlaceSearch";
+import type { LatLng } from "../lib/geo";
+import type { Home } from "../lib/storage";
 import { clearMapCache } from "../lib/mapCache";
 import { checkRouteServer, normaliseServer } from "../lib/routeServer";
 import { ROUTE_SERVER_URL } from "../lib/config";
@@ -14,10 +17,17 @@ interface Props {
   onClose: () => void;
   /** This build's version, shown under About. */
   build: string;
+  home: Home | null;
+  onSetHome: (h: Home | null) => void;
+  /** The plan's first stop, offered as home. */
+  firstStop?: { label: string; position: LatLng } | null;
+  /** Where to search near (the map's centre). */
+  near?: LatLng;
 }
 
 /** App settings: units, clock, how stops are placed, navigation, history. */
-export default function SettingsScreen({ settings: s, onChange, onClearSearches, onClose, build }: Props) {
+export default function SettingsScreen({ settings: s, onChange, onClearSearches, onClose, build, home, onSetHome, firstStop, near }: Props) {
+  const [homeNote, setHomeNote] = useState("");
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...s, [k]: v });
   const [check, setCheck] = useState<{ busy?: boolean; text: string; ok?: boolean } | null>(null);
   const own = s.routeServer !== PUBLIC_ONLY ? s.routeServer : "";
@@ -77,6 +87,45 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
         <h2 id="set-title">Settings</h2>
       </header>
       <div className="screen-body">
+        <h3 className="set-group">Home</h3>
+        <div className="rt-rows home-set">
+          <div className="set-row">
+            <span>
+              <strong>{home ? home.label : "Not set"}</strong>
+              <small>Start loops from home and ride home in one tap (or tap the house on the map).</small>
+            </span>
+            {home && (
+              <button className="link" onClick={() => onSetHome(null)}>
+                Remove
+              </button>
+            )}
+          </div>
+          <div className="set-row server-actions">
+            {firstStop && (
+              <button onClick={() => onSetHome({ label: firstStop.label === "My location" ? "Home" : firstStop.label, position: firstStop.position })}>
+                Use stop A
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setHomeNote("");
+                if (!navigator.geolocation) return setHomeNote("Location isn't available here.");
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => onSetHome({ label: "Home", position: { lat: pos.coords.latitude, lng: pos.coords.longitude } }),
+                  () => setHomeNote("Couldn't get your location."),
+                  { enableHighAccuracy: true, timeout: 10000 },
+                );
+              }}
+            >
+              <Icon name="locate" size={18} /> Where I am now
+            </button>
+            {homeNote && <small className="error-text">{homeNote}</small>}
+          </div>
+          <div className="set-row home-search">
+            <PlaceSearch near={home?.position ?? near} placeholder="Search for your home address" onPick={(label, p) => onSetHome({ label, position: p })} />
+          </div>
+        </div>
+
         <h3 className="set-group">Units of measurement</h3>
         <div className="rt-rows">
           <label className="rt-row">

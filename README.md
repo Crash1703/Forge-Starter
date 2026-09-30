@@ -18,7 +18,7 @@ A motorcycle-focused route planner in the spirit of Calimoto, built entirely on 
 - **Per-section ride styles**: give each leg its own style (say, fast to the hills, twisty through them, then fast home) from the menu next to each stop. Styles are kept in share links.
 - **Backup and restore**: the **Saved** tab can download all saved routes and recorded rides as one file and restore it, so you can move them between the website and the app, or to a new phone. Restoring merges; it doesn't delete anything.
 - **Route details**: distance, riding time, a curviness rating, total climb, an elevation profile (hover it to see the spot on the map) and turn-by-turn directions.
-- **Home**: set your home in the **Saved** tab (from stop A, where you are now, or an address search). It shows as a ⌂ on the map; the round trip page offers it as a start, and the planner's **⌂ From home** / **⌂ Ride home** button adds it in one tap. Backups include it.
+- **Home**: set your home in **Settings** (from stop A, where you are now, or an address search). It shows as a ⌂ on the map; tap it for **Ride home**, **Finish at home** or **Loop from home**; the round trip page offers it as a start, and the planner's **⌂ From home** / **⌂ Ride home** button adds it in one tap. Backups include it.
 - **Save routes** in the browser, **share** them as a link, **import and export GPX** (for Garmin, TomTom, etc.) and hand off to the Google Maps app for live navigation.
 - Works on phones: the map sits on top and the planner below it. Follows the system light or dark theme.
 
