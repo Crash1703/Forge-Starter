@@ -112,7 +112,7 @@ export default function StopList(p: Props) {
                 </button>
               )}
               <button role="menuitem" onClick={() => (setMenu(null), p.onRoundTrip(s))}>
-                <Icon name="loop" size={18} /> Start round trip here
+                <Icon name="loop" size={18} /> {i > 0 ? "Round trip to here" : "Start round trip here"}
               </button>
               {i > 0 && (
                 <button role="menuitem" onClick={() => (setMenu(null), p.onReorder(i, i - 1))}>
