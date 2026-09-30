@@ -138,6 +138,10 @@ const MOVE_REACH = 2000;
 export const spurWarning = (stop: number) =>
   `The route rides up and back down the same road to reach stop ${stop}. Move that pin onto a through road to avoid it.`;
 
+/** The route turns around right at stop `n` (a rider's pin on a through road, with the next part of the ride going back). */
+export const uturnAtStopWarning = (n: number) =>
+  `The route turns around at stop ${n}: the next part of the ride goes back the way it came. Move that pin, or put your stops in another order, to ride on instead.`;
+
 export const UTURN_WARNING =
   "One of your stops can only be reached by turning around, so the route turns back there. Move that pin onto a through road to avoid it.";
 
@@ -527,6 +531,22 @@ function deadEndMoves(r: RouteResult, points: RoutePoint[], numbers: number[]): 
   return moves;
 }
 
+/** A U-turn this close to a stop is at the stop. */
+const AT_PIN_M = 40;
+
+/** Numbers of the rider's own stops the route turns around at (see uturnAtStopWarning). */
+function uturnStops(r: RouteResult, points: RoutePoint[], numbers: number[]): number[] {
+  const out = new Set<number>();
+  for (const st of r.steps) {
+    if (st.type !== 12 && st.type !== 13) continue;
+    const at = r.path[st.at];
+    points.forEach((p, i) => {
+      if (i > 0 && i < points.length - 1 && numbers[i] > 0 && !p.movable && distance(p.pos, at) < AT_PIN_M) out.add(numbers[i]);
+    });
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
 /** Path index where the route actually reached stop `n` (its road, which may be some way from the pin); -1 if not found. */
 function reachedStopAt(r: RouteResult, n: number): number {
   return r.steps.find((st) => st.type === STOP_TYPE && st.instruction === `Stop ${n}`)?.at ?? -1;
@@ -629,7 +649,8 @@ export async function planRoute(
       .slice(1, -1)
       .flatMap((p, i) => (numbers[i + 1] > 0 && outAndBack(r.path, p.pos) > SPUR_METRES ? [spurWarning(numbers[i + 1])] : []));
     const moves = deadEndMoves(r, points, numbers);
-    return { ...r, warnings: spurs.length ? spurs : turnsAround ? [UTURN_WARNING] : [], ...(moves.length ? { moves } : {}) };
+    const turns = uturnStops(r, points, numbers).map(uturnAtStopWarning);
+    return { ...r, warnings: [...(spurs.length ? spurs : turnsAround && !turns.length ? [UTURN_WARNING] : []), ...turns], ...(moves.length ? { moves } : {}) };
   };
   const results = baseRoutes.map((r, i) => withWarnings(toResult(r, i === 0 ? "Recommended" : `Alternative ${i}`, [])));
 
@@ -997,8 +1018,11 @@ export async function planSections(
   // dead-end fixes only see that section: check the whole ride, so a pin or
   // shaping point up a dead end moves off it as on a route planned in one go.
   const joined = joinSections(sections);
-  const moves = deadEndMoves(joined, points, stopNumbers(points));
-  return [moves.length ? { ...joined, moves } : joined];
+  const numbers = stopNumbers(points);
+  const moves = deadEndMoves(joined, points, numbers);
+  // Where sections meet, a turn back shows only in the joined ride.
+  const turns = uturnStops(joined, points, numbers).map(uturnAtStopWarning).filter((w) => !joined.warnings.includes(w));
+  return [{ ...joined, warnings: [...joined.warnings, ...turns], ...(moves.length ? { moves } : {}) }];
 }
 
 /** One route from consecutive sections: paths joined, steps renumbered, arrivals mid-way become stops. */
