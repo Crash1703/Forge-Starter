@@ -40,6 +40,8 @@ expected and what happened; a place or road name helps.
 
 ## What the app sends
 
+The full [privacy policy](https://crash1703.github.io/Forge-Starter/privacy.html) and [terms of use](https://crash1703.github.io/Forge-Starter/terms.html) are online; in short:
+
 - **Routes and places:** to plan a route, the stops and route go to Ride
   Forge's route server (or, if it's not answering, the free public one).
   Searches go to Photon, map pictures to OpenFreeMap.

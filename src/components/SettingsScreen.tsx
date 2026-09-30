@@ -8,7 +8,7 @@ import type { LatLng } from "../lib/geo";
 import type { Home } from "../lib/storage";
 import { clearMapCache } from "../lib/mapCache";
 import { checkRouteServer, normaliseServer } from "../lib/routeServer";
-import { ROUTE_SERVER_URL } from "../lib/config";
+import { PRIVACY_URL, ROUTE_SERVER_URL, TERMS_URL } from "../lib/config";
 import { PUBLIC_ONLY, type Settings } from "../lib/settings";
 
 interface Props {
@@ -331,6 +331,16 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
           <a href="https://valhalla.github.io/valhalla/" target="_blank" rel="noreferrer">Valhalla</a> (FOSSGIS) · search{" "}
           <a href="https://photon.komoot.io" target="_blank" rel="noreferrer">Photon</a> · elevation and weather{" "}
           <a href="https://open-meteo.com" target="_blank" rel="noreferrer">Open-Meteo</a> · version {build}
+        </p>
+        <p className="credits">
+          <a href={PRIVACY_URL} target="_blank" rel="noreferrer">
+            Privacy policy
+          </a>{" "}
+          ·{" "}
+          <a href={TERMS_URL} target="_blank" rel="noreferrer">
+            Terms of use
+          </a>{" "}
+          · <a href="mailto:support@mbcgaming.net">support@mbcgaming.net</a>
         </p>
       </div>
     </div>,
