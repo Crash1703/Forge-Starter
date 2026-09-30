@@ -529,11 +529,9 @@ button.primary:hover:not(:disabled) { filter: brightness(1.05); }
 .suggestions.recent li span { color: var(--muted); }
 .brand .settings-btn { margin-left: 4px; width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 50%; background: transparent; color: var(--muted); }
 .chip-toggle.round { width: 44px; padding: 0; flex: none; }
-.map-chips { overflow-x: auto; scrollbar-width: none; padding: 2px 4px 8px 2px; margin: -2px -4px -8px -2px; }
-.map-chips::-webkit-scrollbar { display: none; }
 .chip-toggle { flex: none; }
 /* The search button pops out into a search box with the map's extras below it. */
-.map-chips.open { overflow: visible; align-items: flex-start; }
+.map-chips.open { align-items: flex-start; }
 .map-search { flex: 1; min-width: 0; max-width: 420px; display: grid; gap: 8px; padding: 8px; border-radius: 18px; background: var(--panel); box-shadow: var(--shadow); animation: pop-out 0.15s ease-out; transform-origin: top left; }
 .map-search .search { margin: 0; }
 .map-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
