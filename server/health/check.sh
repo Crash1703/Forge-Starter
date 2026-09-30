@@ -12,6 +12,12 @@ STATE="${XDG_STATE_HOME:-$HOME/.local/state}/ride-forge-health"
 mkdir -p "$STATE"
 
 say() { echo "$*"; }
+# The monthly map refresh (refresh-map.sh) is rebuilding or switching the
+# graph: leave everything alone until the time it gave.
+if [ -f "$STATE/maintenance" ] && [ "$(date +%s)" -lt "$(cat "$STATE/maintenance")" ]; then
+  say "map refresh under way: not checking"
+  exit 0
+fi
 notify() {
   [ -n "${NTFY_TOPIC:-}" ] || return 0
   curl -s -m 10 -H "Title: Ride Forge server" -d "$1" "https://ntfy.sh/$NTFY_TOPIC" >/dev/null || true

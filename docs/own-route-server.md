@@ -32,8 +32,9 @@ under [`server/graphhopper`](../server/graphhopper).
    ```
    This downloads Java, GraphHopper and Australia's map into
    `~/graphhopper`, then builds the routing graph. That takes 20–40
-   minutes. Run it again every month or two for new roads; the server keeps
-   answering from the old graph until the new one is ready. Run it again
+   minutes. For new roads, the monthly map refresh below does it again by
+   itself (or run this again: the server keeps answering from the old graph
+   until the new one is ready). Run it again
    too after an update changes `server/graphhopper/config.yml` (its
    profiles are built into the graph), then restart the server.
 2. **Keep it running**, and start it whenever the computer starts:
@@ -122,6 +123,23 @@ cp ~/Forge-Starter/server/health/ride-forge-health.{service,timer} ~/.config/sys
 systemctl --user daemon-reload && systemctl --user enable --now ride-forge-health.timer
 journalctl --user -u ride-forge-health        # what it found and did
 ```
+**Monthly map refresh (recommended).** `server/graphhopper/refresh-map.sh`
+downloads the latest Australia map and builds a new graph beside the old
+one while the server keeps answering, then switches over (routes are down
+for the minute the server takes to load it). If the new graph doesn't plan
+a real route within 5 minutes, it switches back to the old one. The build
+needs about 9 GB of memory and is the first thing Linux stops if memory
+runs short; then it's built again with the server stopped (routes down for
+about 20 minutes). The health check leaves the server alone meanwhile.
+```sh
+cp ~/Forge-Starter/server/graphhopper/ride-forge-map-refresh.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now ride-forge-map-refresh.timer
+journalctl --user -u ride-forge-map-refresh     # what it did
+```
+It runs on the 1st of each month at 2 am Queensland time, an hour before
+the nightly stress test (see `stress/README.md`), which then checks the
+new map.
+
 For a phone notification when something stays down (two checks in a row)
 and when it's back, install the free [ntfy](https://ntfy.sh) app, subscribe
 to a hard-to-guess topic name, and put it in
