@@ -532,6 +532,15 @@ button.primary:hover:not(:disabled) { filter: brightness(1.05); }
 .map-chips { overflow-x: auto; scrollbar-width: none; padding: 2px 4px 8px 2px; margin: -2px -4px -8px -2px; }
 .map-chips::-webkit-scrollbar { display: none; }
 .chip-toggle { flex: none; }
+/* The search button pops out into a search box with the map's extras below it. */
+.map-chips.open { overflow: visible; align-items: flex-start; }
+.map-search { flex: 1; min-width: 0; max-width: 420px; display: grid; gap: 8px; padding: 8px; border-radius: 18px; background: var(--panel); box-shadow: var(--shadow); animation: pop-out 0.15s ease-out; transform-origin: top left; }
+.map-search .search { margin: 0; }
+.map-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.map-chip-row .chip-toggle { box-shadow: none; border: 1px solid var(--line); }
+.chip-toggle.badged { position: relative; }
+.chip-toggle.badged::after { content: ""; position: absolute; top: 7px; right: 7px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); border: 2px solid var(--panel); }
+@keyframes pop-out { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
 .sight.pass { border-color: #6b4f2a; color: #6b4f2a; }
 .home-pin { color: #fff; min-height: 0; transition: none; }
 .poi { color: #222; min-height: 0; transition: none; }

@@ -176,6 +176,8 @@ export default function App() {
   const [locating, setLocating] = useState(false);
   const [sightsOn, setSightsOn] = useState(false);
   const [passesOn, setPassesOn] = useState(false);
+  /** The map's search button has popped out into a search box and the map chips. */
+  const [searchOpen, setSearchOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [home, setHomeState] = useState<Home | null>(loadHome);
   const [settings, setSettingsState] = useState<Settings>(loadSettings);
@@ -1824,6 +1826,7 @@ export default function App() {
               // With a pin's (or home's) card open, a tap on the map just closes it.
               if (stopCardId) setStopCardId(null);
               else if (homeCard) setHomeCard(false);
+              else if (searchOpen) setSearchOpen(false);
               else addStop(p);
             }}
             onMapHold={(p) => {
@@ -1851,38 +1854,50 @@ export default function App() {
           />
         </MapErrorBoundary>
         {!riding && (
-          <div className="map-chips">
+          <div className={`map-chips${searchOpen ? " open" : ""}`}>
             <button
-              className="chip-toggle round"
-              aria-label="Search for a place"
-              onClick={() => {
-                setTab("plan");
-                setSnap("full");
-                requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".plan-search input")?.focus());
-              }}
+              className={`chip-toggle round${!searchOpen && (sightsOn || passesOn) ? " badged" : ""}`}
+              aria-label={searchOpen ? "Close search" : "Search and map extras"}
+              aria-expanded={searchOpen}
+              onClick={() => setSearchOpen((o) => !o)}
             >
-              <Icon name="search" size={20} />
+              <Icon name={searchOpen ? "close" : "search"} size={20} />
             </button>
-            <button
-              className="chip-toggle"
-              aria-pressed={sightsOn}
-              onClick={() => {
-                setSightsOn((on) => !on);
-                closePlace();
-              }}
-            >
-              <Icon name="camera" size={18} /> Sights{sightsOn && <Icon name="close" size={16} />}
-            </button>
-            <button
-              className="chip-toggle"
-              aria-pressed={passesOn}
-              onClick={() => {
-                setPassesOn((on) => !on);
-                closePlace();
-              }}
-            >
-              <Icon name="mountain" size={18} /> Passes{passesOn && <Icon name="close" size={16} />}
-            </button>
+            {searchOpen && (
+              <div className="map-search">
+                <PlaceSearch
+                  near={stops[stops.length - 1]?.position ?? center}
+                  placeholder={stops.length ? "Add a stop or destination" : "Search for a start point"}
+                  onPick={(label, p) => {
+                    addStop(p, label);
+                    setSearchOpen(false);
+                    mapRef.current?.easeTo({ center: [p.lng, p.lat], zoom: Math.max(mapRef.current.getZoom(), 12) });
+                  }}
+                />
+                <div className="map-chip-row">
+                  <button
+                    className="chip-toggle"
+                    aria-pressed={sightsOn}
+                    onClick={() => {
+                      setSightsOn((on) => !on);
+                      closePlace();
+                    }}
+                  >
+                    <Icon name="camera" size={18} /> Sights{sightsOn && <Icon name="close" size={16} />}
+                  </button>
+                  <button
+                    className="chip-toggle"
+                    aria-pressed={passesOn}
+                    onClick={() => {
+                      setPassesOn((on) => !on);
+                      closePlace();
+                    }}
+                  >
+                    <Icon name="mountain" size={18} /> Passes{passesOn && <Icon name="close" size={16} />}
+                  </button>
+                </div>
+              </div>
+            )}
             {(sightsOn || passesOn) && sightsNote && <span className="chip-note">{sightsNote}</span>}
           </div>
         )}
