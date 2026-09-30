@@ -1897,7 +1897,6 @@ export default function App() {
               setLoopStart("first");
               setLoopScreen(true);
             }}
-            onSetHome={() => setHome({ label: stopCard.stop.label, position: stopCard.stop.position })}
             onRemove={() => {
               setStopCardId(null);
               removeStop(stopCard.stop.id);

@@ -24,7 +24,6 @@ interface Props {
   onMove: (dir: -1 | 1) => void;
   onSetDestination: (() => void) | null;
   onRoundTrip: () => void;
-  onSetHome: () => void;
   onRemove: () => void;
   onClose: () => void;
 }
@@ -110,9 +109,6 @@ export default function StopCard(p: Props) {
           )}
           <button onClick={p.onRoundTrip}>
             <Icon name="loop" size={16} /> Round trip
-          </button>
-          <button aria-label="Set as home" onClick={p.onSetHome}>
-            <Icon name="home" size={16} /> Home
           </button>
           {p.canMoveUp && (
             <button aria-label="Move earlier in the route" onClick={() => p.onMove(-1)}>
