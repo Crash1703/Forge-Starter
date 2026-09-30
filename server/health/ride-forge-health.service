@@ -1,0 +1,9 @@
+# systemd user service: one run of the Ride Forge health check (check.sh),
+# started by ride-forge-health.timer. Copy both to ~/.config/systemd/user/.
+[Unit]
+Description=Ride Forge health check
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/ride-forge/health.env
+ExecStart=%h/Forge-Starter/server/health/check.sh

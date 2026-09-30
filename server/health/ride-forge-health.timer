@@ -1,0 +1,10 @@
+# Runs the Ride Forge health check every 5 minutes (and 5 minutes after boot).
+[Unit]
+Description=Ride Forge health check every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
