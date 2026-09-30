@@ -1,14 +1,15 @@
-# systemd user service: an https address for the route server through a
-# Cloudflare quick tunnel (no account needed). Copy to ~/.config/systemd/user/
-# (see docs/own-route-server.md). The address changes when this restarts:
+# systemd user service: an https address for the route server through
+# Cloudflare (see tunnel.sh). Copy to ~/.config/systemd/user/ (see
+# docs/own-route-server.md). With a quick tunnel, the address changes when
+# this restarts:
 #   journalctl --user -u ride-forge-tunnel | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1
 [Unit]
 Description=Ride Forge route server tunnel (Cloudflare)
 After=network-online.target ride-forge-graphhopper.service
 
 [Service]
-ExecStart=%h/graphhopper/cloudflared tunnel --no-autoupdate --url http://localhost:8989
-Restart=on-failure
+ExecStart=%h/Forge-Starter/server/graphhopper/tunnel.sh
+Restart=always
 RestartSec=10
 
 [Install]
