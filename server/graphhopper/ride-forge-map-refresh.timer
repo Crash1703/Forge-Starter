@@ -1,0 +1,11 @@
+# The latest Australia map, on the 1st of every month at 2 am Queensland
+# time (16:00 UTC), an hour before the nightly stress test checks it.
+[Unit]
+Description=Ride Forge monthly map refresh
+
+[Timer]
+OnCalendar=*-*-01 16:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

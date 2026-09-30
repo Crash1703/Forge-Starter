@@ -1,0 +1,10 @@
+# systemd user service: one monthly map refresh (refresh-map.sh), started
+# by ride-forge-map-refresh.timer. Copy both to ~/.config/systemd/user/.
+[Unit]
+Description=Ride Forge map refresh
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/ride-forge/health.env
+ExecStart=%h/Forge-Starter/server/graphhopper/refresh-map.sh
+TimeoutStartSec=3h

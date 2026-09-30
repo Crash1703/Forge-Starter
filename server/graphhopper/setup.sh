@@ -20,7 +20,14 @@ if [ ! -f "graphhopper-web-$GH_VERSION.jar" ]; then
   curl -fsSL -o "graphhopper-web-$GH_VERSION.jar" "https://github.com/graphhopper/graphhopper/releases/download/$GH_VERSION/graphhopper-web-$GH_VERSION.jar"
 fi
 echo "Downloading the map (about 1 GB)…"
-curl -fsSL -o map.osm.pbf.new "$MAP_URL" && mv map.osm.pbf.new australia-latest.osm.pbf
+if ! curl -fsSL --max-redirs 5 -o map.osm.pbf.new "$MAP_URL"; then
+  # Geofabrik's "latest" link can break (it looped on 30 Sep 2026): the newest dated copy instead.
+  STEM="${MAP_URL%-latest.osm.pbf}"
+  NAME=$(curl -fsS "$STEM.html" | grep -oE "href=\"${STEM##*/}-[0-9]{6}\.osm\.pbf\"" | cut -d'"' -f2 | sort | tail -1)
+  echo "The latest-map link didn't work; downloading $NAME instead…"
+  curl -fsSL --max-redirs 5 -o map.osm.pbf.new "${MAP_URL%/*}/$NAME"
+fi
+mv map.osm.pbf.new australia-latest.osm.pbf
 cp "$HERE/config.yml" config.yml
 cp "$HERE"/custom_models/*.json custom_models/
 
