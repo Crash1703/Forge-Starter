@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FUEL_PRICES_URL } from "../config";
 import { destination } from "../geo";
 import {
   clearFuelPrices,
@@ -8,6 +9,7 @@ import {
   priceAge,
   priceNear,
   pricesForStations,
+  pricesAvailable,
   pricesFrom,
   sitesFrom,
 } from "../fuelPrices";
@@ -90,9 +92,26 @@ describe("Queensland fuel prices", () => {
     expect(f).toHaveBeenCalledTimes(3);
   });
 
-  it("explains a refused token or a missing one", async () => {
+  it("explains a refused token", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 401 })));
     await expect(loadFuelPrices("wrong")).rejects.toThrow(/didn't accept your token/);
-    await expect(loadFuelPrices("")).rejects.toThrow(/Add your fuel price token/);
+  });
+
+  it("without a token, asks Ride Forge's server, sending no token", async () => {
+    clearFuelPrices();
+    const f = vi.fn(async (url: string, init: RequestInit) => {
+      expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+      const body = url.includes("FuelTypes") ? FUELS : url.includes("SiteDetails") ? SITES : PRICES;
+      return new Response(JSON.stringify(body));
+    });
+    vi.stubGlobal("fetch", f);
+    expect(pricesAvailable("")).toBe(true);
+    const data = await loadFuelPrices("");
+    expect(f.mock.calls.map((c) => String(c[0]))).toEqual([
+      `${FUEL_PRICES_URL}/Subscriber/GetCountryFuelTypes?countryId=21`,
+      `${FUEL_PRICES_URL}/Subscriber/GetFullSiteDetails?countryId=21&geoRegionLevel=3&geoRegionId=1`,
+      `${FUEL_PRICES_URL}/Price/GetSitesPrices?countryId=21&geoRegionLevel=3&geoRegionId=1`,
+    ]);
+    expect(data.sites).toHaveLength(2);
   });
 });

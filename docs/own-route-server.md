@@ -91,6 +91,25 @@ under [`server/graphhopper`](../server/graphhopper).
 The server only listens on the computer itself (`localhost`); the tunnel is
 what lets your phone in.
 
+**Fuel prices through the same address (optional).** With a data-consumer
+token from [fuelpricesqld.com.au](https://www.fuelpricesqld.com.au/), the
+server can hand Queensland fuel prices to the app, so riders don't need a
+token of their own:
+```sh
+mkdir -p ~/.config/ride-forge && (umask 077; echo YOUR-TOKEN > ~/.config/ride-forge/fuel-token)
+cp ~/Forge-Starter/server/fuel/ride-forge-fuel.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now ride-forge-fuel
+```
+Then send `/fuel/` to it in `~/graphhopper/tunnel.yml`, above the route
+server's rule, and restart the tunnel:
+```yaml
+  - hostname: routes.example.com
+    path: ^/fuel/
+    service: http://localhost:8995
+```
+It only passes on the three requests the app makes, and keeps each answer
+for a while (prices for 5 minutes).
+
 ## Valhalla
 
 ### What you need

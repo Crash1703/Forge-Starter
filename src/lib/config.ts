@@ -14,6 +14,11 @@ export const VALHALLA_URL: string = env.VITE_VALHALLA_URL || "https://valhalla1.
  * the public Valhalla server above steps in when it doesn't answer.
  */
 export const ROUTE_SERVER_URL: string = env.VITE_ROUTE_SERVER_URL ?? "https://routes.mbcgaming.net";
+/**
+ * Queensland fuel prices through Ride Forge's server, which holds the token
+ * (see server/fuel): no rider needs one. Empty: only a rider's own token.
+ */
+export const FUEL_PRICES_URL: string = env.VITE_FUEL_PRICES_URL ?? (ROUTE_SERVER_URL ? `${ROUTE_SERVER_URL}/fuel` : "");
 export const PHOTON_URL: string = env.VITE_PHOTON_URL || "https://photon.komoot.io";
 export const ELEVATION_URL: string = env.VITE_ELEVATION_URL || "https://api.open-meteo.com/v1/elevation";
 export const FORECAST_URL: string = env.VITE_FORECAST_URL || "https://api.open-meteo.com/v1/forecast";

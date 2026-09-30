@@ -1,0 +1,14 @@
+# systemd user service: Queensland fuel prices for the app, through the
+# route server's tunnel (see fuel-proxy.mjs). Copy to ~/.config/systemd/user/
+# after putting the token in ~/.config/ride-forge/fuel-token.
+[Unit]
+Description=Ride Forge fuel prices (Queensland)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/node %h/Forge-Starter/server/fuel/fuel-proxy.mjs
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

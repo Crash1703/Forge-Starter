@@ -1,17 +1,24 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
+import { FUEL_PRICES_URL } from "./config";
 import { distance, type LatLng } from "./geo";
 import type { Poi } from "./pois";
 
 /**
  * Queensland fuel prices, from the Queensland Government's Fuel Price
  * Reporting scheme (stations must report every change within 30 minutes).
- * Needs the rider's own free "data consumer" token from fuelpricesqld.com.au.
+ * Asked through Ride Forge's server (FUEL_PRICES_URL), which holds a token;
+ * a rider with their own free "data consumer" token from fuelpricesqld.com.au
+ * asks the government directly instead.
  *
  * The app calls it natively (no browser cross-site limits); the website
- * tries a plain fetch, which the server may refuse.
+ * tries a plain fetch, which the government's server may refuse (Ride
+ * Forge's allows it).
  */
 export const FUEL_API = "https://fppdirectapi-prod.fuelpricesqld.com.au";
 const QLD = "countryId=21&geoRegionLevel=3&geoRegionId=1";
+
+/** Prices can be shown: through Ride Forge's server, or with the rider's own token. */
+export const pricesAvailable = (token: string) => !!token.trim() || !!FUEL_PRICES_URL;
 
 /** Fuels a rider can choose, and how to recognise each in the government's list. */
 export const FUEL_CHOICES = [
@@ -55,8 +62,9 @@ let snapshot: { token: string; data: Snapshot } | null = null;
 export class FuelPriceError extends Error {}
 
 async function get(path: string, token: string, signal?: AbortSignal): Promise<unknown> {
-  const url = `${FUEL_API}${path}`;
-  const headers = { Authorization: `FPDAPI SubscriberToken=${token.trim()}`, "Content-Type": "application/json" };
+  const own = !!token.trim();
+  const url = `${own ? FUEL_API : FUEL_PRICES_URL}${path}`;
+  const headers: Record<string, string> = own ? { Authorization: `FPDAPI SubscriberToken=${token.trim()}`, "Content-Type": "application/json" } : {};
   let status: number;
   let data: unknown;
   if (Capacitor.isNativePlatform()) {
@@ -68,7 +76,7 @@ async function get(path: string, token: string, signal?: AbortSignal): Promise<u
     status = res.status;
     data = res.ok ? await res.json() : null;
   }
-  if (status === 401 || status === 403) throw new FuelPriceError("The fuel price service didn't accept your token. Check it in Settings.");
+  if (own && (status === 401 || status === 403)) throw new FuelPriceError("The fuel price service didn't accept your token. Check it in Settings.");
   if (status < 200 || status >= 300) throw new FuelPriceError(`The fuel price service isn't answering (${status}). Try again later.`);
   return data;
 }
@@ -108,7 +116,7 @@ export function pricesFrom(json: { SitePrices?: { SiteId: number; FuelId: number
 
 /** Fetch (or reuse) today's Queensland stations and prices. */
 export async function loadFuelPrices(token: string, signal?: AbortSignal): Promise<Snapshot> {
-  if (!token.trim()) throw new FuelPriceError("Add your fuel price token in Settings.");
+  if (!pricesAvailable(token)) throw new FuelPriceError("Add your fuel price token in Settings.");
   if (snapshot && snapshot.token === token && Date.now() - snapshot.data.at < KEEP_MS) return snapshot.data;
   const [types, sites, prices] = await Promise.all([
     get("/Subscriber/GetCountryFuelTypes?countryId=21", token, signal),
