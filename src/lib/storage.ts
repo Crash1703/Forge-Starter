@@ -43,6 +43,34 @@ export function routePoints(stops: Stop[], loop: boolean): { position: LatLng; s
 }
 
 /**
+ * A loop's legs pinned to the roads the route rides now: each leg with no
+ * shaping points of its own gets three, a quarter, half and three quarters
+ * of the way along it. Reversed, the loop then rides the same roads the
+ * other way; without them, a two-stop loop (a pin's round trip) reverses to
+ * exactly the same plan. `stopsAt` is where the route reaches each stop.
+ */
+export function shapeFromRoute(stops: Stop[], path: LatLng[], stopsAt: LatLng[]): Stop[] {
+  if (stops.length < 2 || path.length < 2 || stopsAt.length < stops.length) return stops;
+  const cum = [0];
+  for (let i = 1; i < path.length; i++) cum.push(cum[i - 1] + distance(path[i - 1], path[i]));
+  // Where each stop is reached along the path, in order; the loop ends back at the start.
+  const at: number[] = [0];
+  for (let k = 1; k < stops.length; k++) {
+    let best = at[k - 1];
+    for (let i = at[k - 1]; i < path.length; i++) if (distance(path[i], stopsAt[k]) < distance(path[best], stopsAt[k])) best = i;
+    at.push(best);
+  }
+  at.push(path.length - 1);
+  const pointAt = (m: number) => path[Math.min(path.length - 1, cum.findIndex((c) => c >= m))];
+  return stops.map((s, k) => {
+    if (s.shape?.length) return s;
+    const [from, to] = [cum[at[k]], cum[at[k + 1]]];
+    if (to - from < 1000) return s;
+    return { ...s, shape: [0.25, 0.5, 0.75].map((f) => pointAt(from + (to - from) * f)) };
+  });
+}
+
+/**
  * The same route ridden the other way. On a loop the start stays first.
  * Shaping points move to the stop that now begins their leg, in reverse.
  */

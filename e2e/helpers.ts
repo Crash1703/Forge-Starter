@@ -36,3 +36,13 @@ export async function planRoute(page: Page) {
   await addBySearch(page, "Mon", "Montville");
   await expect(page.locator(".summary-stats")).toContainText("km", { timeout: 20_000 });
 }
+
+/** The direction arrows' line (the way the route runs), from the map's own layer, as text. */
+export async function arrowsLine(page: Page) {
+  return page.evaluate(() => {
+    type Src = { serialize(): { data: { features: { geometry: { coordinates: number[][] } }[] } } };
+    const m = (window as unknown as { forgeMap: { getSource(id: string): Src } }).forgeMap;
+    const c = m.getSource("direction").serialize().data.features[0]?.geometry.coordinates ?? [];
+    return c.map((p) => p.map((x) => x.toFixed(4)).join(",")).join(" ");
+  });
+}

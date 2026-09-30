@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { addBySearch, noErrors, openApp, shot } from "./helpers";
+import { addBySearch, arrowsLine, noErrors, openApp, shot } from "./helpers";
 
 test.beforeEach(async ({ page }) => openApp(page));
 test.afterEach(async ({ page }) => noErrors(page));
@@ -57,6 +57,10 @@ test("a pin's Round trip goes there and back, with no length to pick", async ({ 
   await expect(page.locator(".summary-meta")).toContainText("loop", { timeout: 20_000 });
   await expect(page.locator(".pin")).toHaveCount(2);
   await page.screenshot(shot("06-pin-round-trip"));
+  // Reverse: the same two stops, ridden the other way round (the arrows' line changes).
+  const before = await arrowsLine(page);
+  await page.getByRole("button", { name: "Reverse" }).click();
+  await expect.poll(() => arrowsLine(page), { timeout: 20_000 }).not.toBe(before);
 });
 
 test("in a preview ride, add a stop, see its pin, then remove it", async ({ page }) => {
