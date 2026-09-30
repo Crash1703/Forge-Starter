@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
-import { decodeShare, encodeShare, loadHome, normalizeLoop, reverseStops, routePoints, shapeFromRoute, storeHome } from "../storage";
+import { decodeShare, encodeShare, loadHome, normalizeLoop, reverseStops, routePoints, shapeFromRoute, storeHome, type Stop } from "../storage";
 import { destination, distance, type LatLng } from "../geo";
 import { defaultOptions } from "../routes";
 
@@ -150,7 +150,7 @@ describe("reversing a loop rides the same roads the other way", () => {
   });
 
   it("leaves legs that already have shaping points alone", () => {
-    const shaped = [{ ...stops[0], shape: [destination(A, 0, 500)] }, stops[1]];
+    const shaped: Stop[] = [{ ...stops[0], shape: [destination(A, 0, 500)] }, stops[1]];
     const pinned = shapeFromRoute(shaped, path, [A, P, A]);
     expect(pinned[0].shape).toEqual(shaped[0].shape);
     expect(pinned[1].shape).toHaveLength(3);
