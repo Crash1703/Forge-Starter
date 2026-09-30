@@ -432,8 +432,8 @@ a.button { display: inline-flex; align-items: center; padding: 8px 12px; border:
 .ride-add-close { width: 40px; height: 40px; padding: 0; border-radius: 50%; border: none; background: #2a3039; color: var(--ride-text); flex: none; }
 .ride-add input { background: #1d222a; color: var(--ride-text); border-color: #333a44; }
 .ride-add .suggestions { background: #1d222a; color: var(--ride-text); border-color: #333a44; }
-.ride-add-kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 6px; }
-.ride-add-kinds button { min-height: 48px; padding: 0 4px; border-radius: 12px; border: 1px solid #333a44; background: #1d222a; color: var(--ride-text); font-weight: 600; font-size: 0.9rem; white-space: nowrap; }
+.ride-add-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.ride-add-kinds button { min-height: 48px; flex: 1 1 auto; padding: 0 12px; border-radius: 12px; border: 1px solid #333a44; background: #1d222a; color: var(--ride-text); font-weight: 600; font-size: 0.9rem; white-space: nowrap; }
 .ride-add-kinds button[aria-checked="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .ride-add-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .ride-add-list button { width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-height: 48px; padding: 8px 12px; border-radius: 12px; border: none; background: #1d222a; color: var(--ride-text); text-align: left; }

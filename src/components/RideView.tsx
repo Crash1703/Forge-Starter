@@ -132,6 +132,16 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
       .catch(() => undefined); // no limits shown where the map has none or the server is busy
   };
 
+  // Preview: the simulated rider, restarted along the route whenever it changes.
+  const simFix = useRef<((f: Fix) => void) | null>(null);
+  const simStop = useRef<Stop>(() => undefined);
+  /** Preview: ride the route as it is now (after a stop, or a way back), not the one it began with. */
+  const resimulate = (path: LatLng[]) => {
+    if (!simulate || !simFix.current) return;
+    simStop.current();
+    simStop.current = simulateRide(path, simFix.current);
+  };
+
   useEffect(() => {
     loadLimits(active.current);
     let stopGps: Stop = () => undefined;
@@ -177,6 +187,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
         nav.current = new Navigator(joined);
         talk.current = new Announcer(loop, true);
         loadLimits(joined);
+        resimulate(joined.path);
         say("Found a way back to your route.");
         setState(nav.current.update(f));
       } catch {
@@ -194,9 +205,11 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
       if (!simulate) void clearOldTurnNotification();
       letSleep = energySaving ? () => undefined : await keepScreenOn().catch(() => () => undefined);
       letSleepRef.current = letSleep;
-      stopGps = simulate
-        ? simulateRide(route.path, onFix)
-        : subscribeGps(onFix, (m) => !cancelled && setGpsNote(m));
+      if (simulate) {
+        simFix.current = onFix;
+        simStop.current = simulateRide(route.path, onFix);
+        stopGps = () => simStop.current();
+      } else stopGps = subscribeGps(onFix, (m) => !cancelled && setGpsNote(m));
     })();
 
     return () => {
@@ -305,6 +318,7 @@ export default function RideView({ route, options, loop, simulate, followBreaks,
     setEndsHome(home);
     talk.current = new Announcer(home, true);
     loadLimits(next);
+    resimulate(next.path);
     setState(nav.current.update(f));
   }
 

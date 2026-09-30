@@ -4,3 +4,6 @@ dist
 .env.local
 *.log
 *.tsbuildinfo
+e2e/screenshots/
+test-results/
+playwright-report/
