@@ -91,6 +91,13 @@ function fuelAnswer(path: string) {
 /** Feedback and error reports the app sent (to Ride Forge's server), per page. */
 export const reports = new WeakMap<Page, Record<string, unknown>[]>();
 
+/** Places (Ride Forge's server answers Overpass queries): the two fuel stations when fuel is asked for, otherwise nothing. */
+function fakePlaces(route: Route, body: string) {
+  const query = decodeURIComponent(body.replace(/^data=/, "").replace(/\+/g, " "));
+  const fuel = query.includes('"amenity"="fuel"');
+  return json(route, { elements: fuel ? STATIONS.map((st) => ({ type: "node", id: st.id, lat: st.lat, lon: st.lng, tags: { amenity: "fuel", name: st.name } })) : [] });
+}
+
 /** Answer every outside request the app makes. */
 export async function fakeServices(page: Page) {
   const sent: Record<string, unknown>[] = [];
@@ -113,6 +120,7 @@ export async function fakeServices(page: Page) {
         return json(route, fakeRoute(body.points));
       }
       if (url.pathname.startsWith("/fuel/")) return json(route, fuelAnswer(url.pathname));
+      if (url.pathname === "/places/interpreter") return fakePlaces(route, req.postData() ?? "");
       if (url.pathname === "/elevation") {
         const n = (url.searchParams.get("latitude") ?? "").split(",").length;
         return json(route, { elevation: Array.from({ length: n }, (_, i) => 100 + 40 * Math.sin(i / 3)) });
@@ -153,12 +161,8 @@ export async function fakeServices(page: Page) {
       return json(route, { elevation: Array.from({ length: n }, (_, i) => 100 + 40 * Math.sin(i / 3)) });
     }
     if (host === "api.open-meteo.com") return json(route, {}, 503);
-    // OpenStreetMap lookups: the two fuel stations when fuel is asked for, otherwise nothing.
-    if (url.pathname.includes("interpreter")) {
-      const query = decodeURIComponent((req.postData() ?? "").replace(/^data=/, "").replace(/\+/g, " "));
-      const fuel = query.includes('"amenity"="fuel"');
-      return json(route, { elements: fuel ? STATIONS.map((st) => ({ type: "node", id: st.id, lat: st.lat, lon: st.lng, tags: { amenity: "fuel", name: st.name } })) : [] });
-    }
+    // Anyone still asking a public Overpass server: the same answer.
+    if (url.pathname.includes("interpreter")) return fakePlaces(route, req.postData() ?? "");
     // Anything else (map tiles, Wikidata…): not needed.
     return route.fulfill({ status: 404, body: "" });
   });
