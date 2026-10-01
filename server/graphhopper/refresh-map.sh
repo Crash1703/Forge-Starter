@@ -102,6 +102,13 @@ if plans_routes 300; then
   mv "$MAP.new" "$MAP"
   date=$(curl -s -m 10 "http://localhost:$PORT/info" | grep -oE '"data_date":"[0-9-]+' | cut -d'"' -f4)
   say "done: the route server is on the new map (data from ${date:-?})"
+  # The places the app looks up (fuel, cafés, sights…), from the same new map.
+  if "$HERE/../places/build-places.sh" && systemctl --user restart ride-forge-places; then
+    say "places rebuilt from the new map"
+  else
+    say "places couldn't be rebuilt; still on the old ones"
+    notify "Monthly map update: the places (fuel, cafés…) couldn't be rebuilt from the new map. Still on the old ones."
+  fi
   notify "Monthly map update done: map data from ${date:-?}."
 else
   say "the new graph didn't plan routes; switching back"

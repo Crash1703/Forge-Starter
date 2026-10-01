@@ -1,0 +1,14 @@
+# systemd user service: places for the app (places.mjs), from
+# ~/places/places.geojsonseq (build-places.sh), through the route server's
+# tunnel at /places/. Copy to ~/.config/systemd/user/.
+[Unit]
+Description=Ride Forge places (fuel, cafés, sights…)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/node %h/Forge-Starter/server/places/places.mjs
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

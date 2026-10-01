@@ -107,7 +107,19 @@ if systemctl --user is-enabled -q ride-forge-elevation 2>/dev/null; then
   result "Elevation" "$elevation_ok" "the elevation service wasn't answering, so it was restarted"
 fi
 
-# 6. The public address (the tunnel), when the route server itself is answering.
+# 6. Places (fuel, cafés, sights… from the map): restart it if it doesn't answer.
+if systemctl --user is-enabled -q ride-forge-places 2>/dev/null; then
+  places_ok=1
+  # It takes a few seconds to load the places after a start.
+  if ! curl -sf -m 10 http://localhost:8999/places/health >/dev/null && [ "$(up_for ride-forge-places)" -ge 60 ]; then
+    say "places service: no answer; restarting it"
+    systemctl --user restart ride-forge-places
+    places_ok=0
+  fi
+  result "Places" "$places_ok" "the places service wasn't answering, so it was restarted"
+fi
+
+# 7. The public address (the tunnel), when the route server itself is answering.
 if [ "$check_public" = 1 ]; then
   if curl -sf -m 20 "$ROUTE_URL/info" | grep -q '"profiles"'; then
     result "Public address" 1 ""

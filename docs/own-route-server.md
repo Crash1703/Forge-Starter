@@ -146,6 +146,18 @@ cp ~/Forge-Starter/server/elevation/ride-forge-elevation.service ~/.config/syste
 systemctl --user daemon-reload && systemctl --user enable --now ride-forge-elevation
 ```
 
+**Places.** Fuel, cafés, food, pubs, toilets, lookouts, sights and passes
+come from the server's own copy of the map: `server/places/build-places.sh`
+cuts them from the Australia map (needs `sudo apt install osmium-tool`;
+about 4 minutes), and `server/places/places.mjs` (port 8999, behind
+`/places/`) answers the app's Overpass queries from memory. The monthly map
+refresh rebuilds them.
+```sh
+~/Forge-Starter/server/places/build-places.sh
+cp ~/Forge-Starter/server/places/ride-forge-places.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now ride-forge-places
+```
+
 **Health check (recommended).** Every 5 minutes, `server/health/check.sh`
 asks the route server for a real route, the fuel service for its fuel list,
 and the public address for the server's info. Whatever is stuck gets

@@ -34,12 +34,13 @@ export const ELEVATION_URL: string = env.VITE_ELEVATION_URL || (env.VITE_ROUTE_S
 /** Weather: MET Norway, through Ride Forge's server (see server/weather), answered as Open-Meteo would. */
 export const FORECAST_URL: string =
   env.VITE_FORECAST_URL || (env.VITE_ROUTE_SERVER_URL ?? "https://routes.mbcgaming.net") + "/weather/forecast";
-export const OVERPASS_URL: string = env.VITE_OVERPASS_URL || "https://overpass-api.de/api/interpreter";
 /**
- * Another public Overpass server, asked at the same time as the main one:
- * when the main one is overloaded (it often is), this one usually answers.
+ * Places (fuel, cafés, sights…): Ride Forge's server answers the app's
+ * Overpass queries from the map it routes on (see server/places).
  */
-export const OVERPASS_MIRRORS: string[] = env.VITE_OVERPASS_URL ? [] : ["https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+export const OVERPASS_URL: string = env.VITE_OVERPASS_URL || (env.VITE_ROUTE_SERVER_URL ?? "https://routes.mbcgaming.net") + "/places/interpreter";
+/** Other servers asked at the same time (none: the public Overpass servers aren't for a paid app's traffic). */
+export const OVERPASS_MIRRORS: string[] = [];
 export const WIKIDATA_URL: string = env.VITE_WIKIDATA_URL || "https://www.wikidata.org/w/api.php";
 
 /** Terrain map: OpenTopoMap raster tiles (contours and hill shading). */
