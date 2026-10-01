@@ -96,7 +96,18 @@ if systemctl --user is-enabled -q ride-forge-weather 2>/dev/null; then
   result "Weather" "$weather_ok" "the weather service wasn't answering, so it was restarted"
 fi
 
-# 5. The public address (the tunnel), when the route server itself is answering.
+# 5. Elevation (the terrain model on this server): restart it if it doesn't answer.
+if systemctl --user is-enabled -q ride-forge-elevation 2>/dev/null; then
+  elevation_ok=1
+  if ! curl -sf -m 10 http://localhost:8998/elevation/health >/dev/null; then
+    say "elevation service: no answer; restarting it"
+    systemctl --user restart ride-forge-elevation
+    elevation_ok=0
+  fi
+  result "Elevation" "$elevation_ok" "the elevation service wasn't answering, so it was restarted"
+fi
+
+# 6. The public address (the tunnel), when the route server itself is answering.
 if [ "$check_public" = 1 ]; then
   if curl -sf -m 20 "$ROUTE_URL/info" | grep -q '"profiles"'; then
     result "Public address" 1 ""

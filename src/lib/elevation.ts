@@ -28,9 +28,9 @@ export function climbStats(elevations: number[], threshold = 3) {
 }
 
 const SAMPLES = 200;
-const PER_REQUEST = 100; // Open-Meteo's limit on coordinates per call
+const PER_REQUEST = 100; // the elevation service's limit on points per call (as Open-Meteo's)
 
-/** Elevation profile from Open-Meteo (Copernicus 90 m terrain model). */
+/** Elevation profile from Ride Forge's server (Copernicus 90 m terrain model). */
 export async function elevationProfile(path: LatLng[], signal?: AbortSignal): Promise<ElevationProfile> {
   const total = pathLength(path);
   const pts = resample(path, Math.max(total / (SAMPLES - 1), 1)).slice(0, SAMPLES);

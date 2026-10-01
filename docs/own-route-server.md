@@ -136,6 +136,16 @@ cp ~/Forge-Starter/server/weather/ride-forge-weather.service ~/.config/systemd/u
 systemctl --user daemon-reload && systemctl --user enable --now ride-forge-weather
 ```
 
+**Elevation.** Climb figures and elevation charts come from the Copernicus
+90 m terrain model on the server (free for any use, including commercial).
+Download Australia's tiles once (about 3 GB), then run the service
+(`server/elevation/elevation.mjs`, port 8998, behind `/elevation`):
+```sh
+node ~/Forge-Starter/server/elevation/fetch-dem.mjs     # into ~/dem; can be re-run to resume
+cp ~/Forge-Starter/server/elevation/ride-forge-elevation.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now ride-forge-elevation
+```
+
 **Health check (recommended).** Every 5 minutes, `server/health/check.sh`
 asks the route server for a real route, the fuel service for its fuel list,
 and the public address for the server's info. Whatever is stuck gets

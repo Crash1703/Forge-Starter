@@ -1,0 +1,14 @@
+# systemd user service: elevation for the app from the Copernicus terrain
+# model in ~/dem (elevation.mjs; fetch-dem.mjs downloads it), through the
+# route server's tunnel at /elevation. Copy to ~/.config/systemd/user/.
+[Unit]
+Description=Ride Forge elevation (Copernicus DEM)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/node %h/Forge-Starter/server/elevation/elevation.mjs
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

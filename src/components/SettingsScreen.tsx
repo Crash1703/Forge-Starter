@@ -331,7 +331,10 @@ export default function SettingsScreen({ settings: s, onChange, onClearSearches,
           <a href="https://valhalla.github.io/valhalla/" target="_blank" rel="noreferrer">Valhalla</a> (FOSSGIS) · search{" "}
           <a href="https://photon.komoot.io" target="_blank" rel="noreferrer">Photon</a> · weather{" "}
           <a href="https://www.met.no/en" target="_blank" rel="noreferrer">MET Norway</a> (CC BY 4.0) · elevation{" "}
-          <a href="https://open-meteo.com" target="_blank" rel="noreferrer">Open-Meteo</a> · version {build}
+          <a href="https://spacedata.copernicus.eu/collections/copernicus-digital-elevation-model" target="_blank" rel="noreferrer">
+            Copernicus DEM
+          </a>{" "}
+          (© DLR, Airbus DS, EU/ESA) · version {build}
         </p>
         <p className="credits">
           <a href={PRIVACY_URL} target="_blank" rel="noreferrer">

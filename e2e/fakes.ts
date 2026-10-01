@@ -113,6 +113,10 @@ export async function fakeServices(page: Page) {
         return json(route, fakeRoute(body.points));
       }
       if (url.pathname.startsWith("/fuel/")) return json(route, fuelAnswer(url.pathname));
+      if (url.pathname === "/elevation") {
+        const n = (url.searchParams.get("latitude") ?? "").split(",").length;
+        return json(route, { elevation: Array.from({ length: n }, (_, i) => 100 + 40 * Math.sin(i / 3)) });
+      }
       if (url.pathname === "/weather/forecast") {
         // Mild, dry, with a shower in the afternoon: an hour-by-hour forecast for each place asked about.
         const n = (url.searchParams.get("latitude") ?? "").split(",").length;
