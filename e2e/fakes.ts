@@ -120,6 +120,15 @@ export async function fakeServices(page: Page) {
         return json(route, fakeRoute(body.points));
       }
       if (url.pathname.startsWith("/fuel/")) return json(route, fuelAnswer(url.pathname));
+      // Place search and place names (Ride Forge's own Photon).
+      if (url.pathname.startsWith("/api") || url.pathname === "/reverse") {
+        if (url.pathname === "/reverse") {
+          return json(route, { features: [{ geometry: { coordinates: [+url.searchParams.get("lon")!, +url.searchParams.get("lat")!] }, properties: { name: "Test Street", city: "Caloundra" } }] });
+        }
+        const q = (url.searchParams.get("q") ?? "").toLowerCase();
+        const hits = PLACES.filter((p) => p.name.toLowerCase().startsWith(q.slice(0, 3)));
+        return json(route, { features: hits.map((p) => ({ geometry: { coordinates: [p.lng, p.lat] }, properties: { name: p.name, state: "Queensland", country: "Australia" } })) });
+      }
       if (url.pathname === "/places/interpreter") return fakePlaces(route, req.postData() ?? "");
       if (url.pathname === "/elevation") {
         const n = (url.searchParams.get("latitude") ?? "").split(",").length;
@@ -146,15 +155,6 @@ export async function fakeServices(page: Page) {
         return route.fulfill({ status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
       }
       return json(route, {}, 404);
-    }
-    // Place search and place names (Photon).
-    if (host === "photon.komoot.io") {
-      if (url.pathname === "/reverse") {
-        return json(route, { features: [{ geometry: { coordinates: [+url.searchParams.get("lon")!, +url.searchParams.get("lat")!] }, properties: { name: "Test Street", city: "Caloundra" } }] });
-      }
-      const q = (url.searchParams.get("q") ?? "").toLowerCase();
-      const hits = PLACES.filter((p) => p.name.toLowerCase().startsWith(q.slice(0, 3)));
-      return json(route, { features: hits.map((p) => ({ geometry: { coordinates: [p.lng, p.lat] }, properties: { name: p.name, state: "Queensland", country: "Australia" } })) });
     }
     if (host === "api.open-meteo.com" && url.pathname.includes("elevation")) {
       const n = (url.searchParams.get("latitude") ?? "").split(",").length;

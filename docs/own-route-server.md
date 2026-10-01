@@ -158,6 +158,19 @@ cp ~/Forge-Starter/server/places/ride-forge-places.service ~/.config/systemd/use
 systemctl --user daemon-reload && systemctl --user enable --now ride-forge-places
 ```
 
+**Place search.** Searches and pin names come from the server's own Photon
+(the search engine the app always used) with Australia's places, from the
+weekly export at download1.graphhopper.com. `server/photon/refresh.sh`
+downloads it (about 530 MB) and builds the index (needs `zstd`); `start.sh`
+serves it on port 2322, behind `/api` and `/reverse`. The monthly map
+refresh runs refresh.sh too.
+```sh
+mkdir -p ~/photon && curl -fsSL -o ~/photon/photon-1.3.0.jar https://github.com/komoot/photon/releases/download/1.3.0/photon-1.3.0.jar
+cp ~/Forge-Starter/server/photon/ride-forge-photon.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable ride-forge-photon
+~/Forge-Starter/server/photon/refresh.sh     # builds the data and starts it
+```
+
 **Health check (recommended).** Every 5 minutes, `server/health/check.sh`
 asks the route server for a real route, the fuel service for its fuel list,
 and the public address for the server's info. Whatever is stuck gets

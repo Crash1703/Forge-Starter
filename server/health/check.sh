@@ -119,7 +119,18 @@ if systemctl --user is-enabled -q ride-forge-places 2>/dev/null; then
   result "Places" "$places_ok" "the places service wasn't answering, so it was restarted"
 fi
 
-# 7. The public address (the tunnel), when the route server itself is answering.
+# 7. Place search (Photon): restart it if it doesn't answer (it takes a minute to start).
+if systemctl --user is-enabled -q ride-forge-photon 2>/dev/null; then
+  photon_ok=1
+  if ! curl -sf -m 10 "http://localhost:2322/api?q=Brisbane&limit=1" | grep -q '"features"' && [ "$(up_for ride-forge-photon)" -ge 180 ]; then
+    say "place search: no answer; restarting it"
+    systemctl --user restart ride-forge-photon
+    photon_ok=0
+  fi
+  result "Place search" "$photon_ok" "the place search wasn't answering, so it was restarted"
+fi
+
+# 8. The public address (the tunnel), when the route server itself is answering.
 if [ "$check_public" = 1 ]; then
   if curl -sf -m 20 "$ROUTE_URL/info" | grep -q '"profiles"'; then
     result "Public address" 1 ""
