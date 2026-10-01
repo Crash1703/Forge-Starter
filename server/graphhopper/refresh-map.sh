@@ -109,6 +109,13 @@ if plans_routes 300; then
     say "places couldn't be rebuilt; still on the old ones"
     notify "Monthly map update: the places (fuel, cafés…) couldn't be rebuilt from the new map. Still on the old ones."
   fi
+  # Place search too (the weekly Photon export of Australia).
+  if systemctl --user is-enabled -q ride-forge-photon 2>/dev/null; then
+    if "$HERE/../photon/refresh.sh"; then say "place search refreshed"; else
+      say "place search couldn't be refreshed; still on the old data"
+      notify "Monthly map update: the place search couldn't be refreshed. Still on the old data."
+    fi
+  fi
   notify "Monthly map update done: map data from ${date:-?}."
 else
   say "the new graph didn't plan routes; switching back"

@@ -28,7 +28,8 @@ export const TERMS_URL = "https://crash1703.github.io/Forge-Starter/terms.html";
 /** Where the latest Android release is announced. */
 export const RELEASES_API = "https://api.github.com/repos/Crash1703/Forge-Starter/releases/latest";
 export const FUEL_PRICES_URL: string = env.VITE_FUEL_PRICES_URL ?? (ROUTE_SERVER_URL ? `${ROUTE_SERVER_URL}/fuel` : "");
-export const PHOTON_URL: string = env.VITE_PHOTON_URL || "https://photon.komoot.io";
+/** Place search and names: Ride Forge's own Photon, with Australia's places (see server/photon). */
+export const PHOTON_URL: string = env.VITE_PHOTON_URL || (env.VITE_ROUTE_SERVER_URL ?? "https://routes.mbcgaming.net");
 /** Elevation: the Copernicus 90 m terrain model on Ride Forge's server (see server/elevation), answered as Open-Meteo would. */
 export const ELEVATION_URL: string = env.VITE_ELEVATION_URL || (env.VITE_ROUTE_SERVER_URL ?? "https://routes.mbcgaming.net") + "/elevation";
 /** Weather: MET Norway, through Ride Forge's server (see server/weather), answered as Open-Meteo would. */

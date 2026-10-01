@@ -1,0 +1,14 @@
+# systemd user service: Ride Forge's place search (Photon, start.sh), with
+# Australia's places (refresh.sh), through the route server's tunnel at /api
+# and /reverse. Copy to ~/.config/systemd/user/.
+[Unit]
+Description=Ride Forge place search (Photon)
+After=network-online.target
+
+[Service]
+ExecStart=%h/Forge-Starter/server/photon/start.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
