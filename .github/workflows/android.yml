@@ -47,7 +47,8 @@ jobs:
           RIDE_FORGE_KEYSTORE: ${{ runner.temp }}/ride-forge-release.keystore
           RIDE_FORGE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           RIDE_FORGE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: ./gradlew assembleRelease -PversionCode=${{ github.run_number }} -PversionName=$VERSION
+        # The APK for sideloading, and the bundle (AAB) Google Play takes: same version, same key.
+        run: ./gradlew assembleRelease bundleRelease -PversionCode=${{ github.run_number }} -PversionName=$VERSION
       # Signed with the release key (not the old one, not unsigned), or no release.
       - name: Check the signature
         run: |
@@ -55,10 +56,20 @@ jobs:
           "$APKSIGNER" verify --print-certs android/app/build/outputs/apk/release/app-release.apk | tee signature.txt
           grep -q "CN=Ride Forge, O=Ride Forge, C=AU" signature.txt
       - run: cp android/app/build/outputs/apk/release/app-release.apk RideForge-$VERSION.apk
+      - name: Check the bundle's signature
+        run: |
+          cp android/app/build/outputs/bundle/release/app-release.aab RideForge-$VERSION.aab
+          jarsigner -verify -verbose:summary -certs RideForge-$VERSION.aab | tee bundle-signature.txt
+          grep -q "CN=Ride Forge, O=Ride Forge, C=AU" bundle-signature.txt
       - uses: actions/upload-artifact@v4
         with:
           name: RideForge-${{ env.VERSION }}
           path: RideForge-${{ env.VERSION }}.apk
+      # For Google Play (upload it in the Play Console): Actions run → Artifacts.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RideForge-${{ env.VERSION }}-play
+          path: RideForge-${{ env.VERSION }}.aab
       - uses: softprops/action-gh-release@v2
         if: github.event_name != 'pull_request'
         with:
