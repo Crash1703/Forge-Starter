@@ -56,12 +56,14 @@ const PATHS = {
       <path d="M6 27 L14 35 L22 27" />
     </>
   ),
+  // In from below, round the ring clockwise (as Australian roundabouts go),
+  // out at the top; the rest of the ring faint. (The exit number is in the
+  // text beside it.) The old one, a ring with an arrow off it, looked like ♂.
   roundabout: (
     <>
-      <circle cx="24" cy="21" r="9" />
-      <path d="M24 44 V30" />
-      <path d="M31 14 L39 6" />
-      <path d="M30 6 H39 V15" />
+      <path d="M24 13 A10 10 0 0 1 24 33" opacity="0.35" />
+      <path d="M24 45 V33 A10 10 0 0 1 24 13 V5" />
+      <path d="M17 11 L24 4 L31 11" />
     </>
   ),
   merge: (

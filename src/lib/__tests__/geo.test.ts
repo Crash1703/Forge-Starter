@@ -128,6 +128,10 @@ describe("formatting", () => {
     expect(formatDistance(123456)).toBe("123 km");
     expect(formatDuration(45 * 60)).toBe("45 min");
     expect(formatDuration(3 * 3600 + 5 * 60)).toBe("3 h 05 min");
+    // Rounding up into the next hour carries: never "1 h 60 min".
+    expect(formatDuration(2 * 3600 - 20)).toBe("2 h 00 min");
+    expect(formatDuration(3600 - 20)).toBe("1 h 00 min");
+    expect(formatDuration(59 * 60 + 20)).toBe("59 min");
   });
 });
 

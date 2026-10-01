@@ -1409,7 +1409,7 @@ export default function App() {
                   )}
                   <div className="menu-wrap">
                     <button aria-expanded={menu === "avoid"} aria-haspopup="true" onClick={() => openMenu("avoid")}>
-                      Avoid{avoidCount ? ` (${avoidCount})` : ""} <Icon name="chevronDown" size={16} />
+                      Avoid{avoidCount ? ` (${avoidCount})` : ""} <Icon name="chevronDown" size={16} className="chevron" />
                     </button>
                     {menu === "avoid" && (
                       <div className="menu" role="group" aria-label="Avoid">

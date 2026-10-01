@@ -120,3 +120,23 @@ test("send feedback from Settings", async ({ page }) => {
   await page.locator("#set-feedback").scrollIntoViewIfNeeded();
   await page.screenshot(shot("17-feedback"));
 });
+
+test.describe("on a narrow phone (360 px)", () => {
+  test.use({ viewport: { width: 360, height: 640 }, deviceScaleFactor: 2 });
+
+  test("a loop's planner fits the screen, folded and opened", async ({ page }) => {
+    await page.locator("button.fab.accent").click();
+    await page.getByRole("button", { name: "Create a round trip" }).click();
+    await expect(page.getByRole("radiogroup", { name: "Loops to choose from" })).toBeVisible({ timeout: 90_000 });
+    await expect(page.locator(".summary-meta")).toContainText("loop", { timeout: 30_000 });
+    // Nothing wider than the screen: not the planner, nor what scrolls inside it.
+    const fits = () =>
+      page.evaluate(() => [".sheet", ".sheet .scroll", ".summary"].map((s) => document.querySelector(s)).filter(Boolean).every((el) => el!.scrollWidth <= el!.clientWidth));
+    expect(await fits()).toBe(true);
+    await page.screenshot(shot("18-narrow-loop"));
+    await page.getByRole("button", { name: "Expand planner" }).click();
+    await page.waitForTimeout(1000);
+    expect(await fits()).toBe(true);
+    await page.screenshot(shot("19-narrow-details"));
+  });
+});

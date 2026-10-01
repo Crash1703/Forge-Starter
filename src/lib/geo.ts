@@ -675,8 +675,10 @@ export function formatTime(t: number | Date): string {
 
 export function formatDuration(s: number): string {
   if (s > 0 && s < 30) return "under 1 min";
-  const h = Math.floor(s / 3600);
-  const m = Math.round((s % 3600) / 60);
+  // Round the whole first, so 1 h 59.7 min is "2 h 00 min", not "1 h 60 min".
+  const minutes = Math.round(s / 60);
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
   return h ? `${h} h ${m.toString().padStart(2, "0")} min` : `${m} min`;
 }
 
