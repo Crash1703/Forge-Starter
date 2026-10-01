@@ -13,7 +13,8 @@ test("the round-trip page makes a loop from where you are, with loops to choose 
   await expect(choices).toBeVisible({ timeout: 60_000 });
   // Up to three (Best balance, Most curvy, Another way); ones that come out the same are dropped.
   expect(await choices.getByRole("radio").count()).toBeGreaterThanOrEqual(2);
-  await expect(page.locator(".summary-meta")).toContainText("loop");
+  // The loops can show while the chosen one is still being finished: give the summary time.
+  await expect(page.locator(".summary-meta")).toContainText("loop", { timeout: 20_000 });
   await page.screenshot(shot("11-round-trip-choices"));
   // Customise · Recalculate · Avoid and Ride · Save · ⋯ fit the phone's width.
   for (const row of [".summary-tools", ".summary-actions"]) {
