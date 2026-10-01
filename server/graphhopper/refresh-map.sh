@@ -43,7 +43,7 @@ build() {
   rm -rf graph-cache.new graph-cache.bad
   (
     echo 1000 >/proc/self/oom_score_adj
-    exec jdk/bin/java -Xmx9g -Xms2g -Ddw.graphhopper.datareader.file="$MAP.new" -Ddw.graphhopper.graph.location=graph-cache.new \
+    exec jdk/bin/java -Xmx8g -Xms2g -Ddw.graphhopper.datareader.file="$MAP.new" -Ddw.graphhopper.graph.location=graph-cache.new \
       -jar graphhopper-web-11.0.jar import config.yml
   ) >logs/refresh-import.out 2>&1
 }
