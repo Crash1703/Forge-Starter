@@ -93,6 +93,53 @@ describe("Navigator", () => {
   });
 });
 
+describe("a loop that ends where it starts", () => {
+  /** A 2 km square: 500 m east, south, west and back north to the start. Points every 50 m. */
+  function loop(): NavRoute {
+    const path: LatLng[] = [start];
+    for (const brg of [90, 180, 270, 0]) for (let i = 0; i < 10; i++) path.push(destination(path[path.length - 1], brg, 50));
+    return { path, distance: 2000, duration: 240, steps: [step(1, 0, "Head east."), step(4, path.length - 1, "You're back.")] };
+  }
+
+  it("doesn't think you've arrived when you set off from just off the road (a driveway)", () => {
+    const route = loop();
+    const nav = new Navigator(route);
+    // 60 m west of the start: as close to the finish as to the start.
+    const drive = destination(start, 270, 60);
+    let s = nav.update(fixAt(drive, 0, null));
+    expect(s.arrived).toBe(false);
+    s = nav.update(fixAt(drive, 1, null));
+    expect(s.arrived).toBe(false);
+    expect(s.remaining).toBeGreaterThan(1500);
+    // Finding the way onto the route aims near the start, not the finish.
+    expect(nav.closestIndex(drive)).toBeLessThan(5);
+  });
+
+  it("arrives once you've ridden round", () => {
+    const route = loop();
+    const nav = new Navigator(route);
+    let s = nav.update(fixAt(route.path[0], 0, 90));
+    expect(s.arrived).toBe(false);
+    route.path.forEach((p, i) => {
+      if (i) s = nav.update(fixAt(p, i * 5, null));
+    });
+    expect(s.arrived).toBe(true);
+  });
+
+  it("still takes a GPS gap on the way round", () => {
+    const route = loop();
+    const nav = new Navigator(route);
+    nav.update(fixAt(route.path[0], 0, 90));
+    nav.update(fixAt(route.path[5], 25, 90));
+    // No fix for a while, then you're on the last side, heading home.
+    let s = nav.update(fixAt(route.path[35], 200, 0));
+    expect(s.onRoute).toBe(true);
+    expect(s.along).toBeGreaterThan(1700);
+    s = nav.update(fixAt(route.path[40], 230, 0));
+    expect(s.arrived).toBe(true);
+  });
+});
+
 describe("spliceRejoin", () => {
   it("rides the way back, then the rest of the plan with steps re-numbered", () => {
     const route = lRoute();

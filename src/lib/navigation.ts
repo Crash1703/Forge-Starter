@@ -130,16 +130,26 @@ export class Navigator {
     const back = this.indexAt(this.along - 150);
     const ahead = this.indexAt(this.along + Math.max(800, (speed ?? 0) * 60)) + 1;
     let m = this.best(fix, back, ahead, heading, moving);
+    // As far along the route as you could have ridden since the last fix
+    // (twisty roads are longer than the straight line, hence twice).
+    const couldRide = moved * 2 + 100;
     if (m.dist > tolerance) {
-      // Rejoined further on (a short cut, or back from a detour)? Look ahead along the whole route.
-      const far = this.best(fix, this.index, this.route.path.length, heading, moving);
+      // Rejoined further on (a short cut, back from a detour, or after a GPS
+      // gap)? Look ahead along the whole route, but not into the run-in to
+      // the finish unless you could be most of the way round by now: on a
+      // loop the finish is where you start, and starting a little off the
+      // road (a driveway) matched the finish, and "arrived".
+      const far = this.best(fix, this.index, this.lastStretchFrom(couldRide), heading, moving);
       if (far.dist <= tolerance) m = far;
     }
 
     let onRoute: boolean;
     if (m.i >= 0 && m.dist <= tolerance) {
+      const along = this.cum[m.i] + m.t * (this.cum[m.i + 1] - this.cum[m.i]);
+      // Ridden: going on along the route, as far as you could have since the last fix.
+      if (along > this.along) this.ridden += Math.min(along - this.along, couldRide);
       this.index = m.i;
-      this.along = this.cum[m.i] + m.t * (this.cum[m.i + 1] - this.cum[m.i]);
+      this.along = along;
       this.offSince = null;
       this.everOn = true;
       onRoute = true;
@@ -151,7 +161,8 @@ export class Navigator {
 
     const total = this.total;
     const remaining = Math.max(0, total - this.along);
-    if (onRoute && m.dist <= tolerance && remaining < 35) this.done = true;
+    // Arrived: at the finish, having ridden at least half of the way there.
+    if (onRoute && m.dist <= tolerance && remaining < 35 && this.ridden >= Math.min(total / 2, total - 500)) this.done = true;
 
     const { steps } = this.route;
     while (this.stepPtr < steps.length - 1 && this.cum[steps[this.stepPtr].at] <= this.along + 3) this.stepPtr++;
@@ -174,19 +185,38 @@ export class Navigator {
     };
   }
 
-  /** Path index nearest to `p` anywhere on the route. */
+  /**
+   * Path index nearest to `p` on the route, leaving out the run-in to the
+   * finish until most of the ride is done (on a loop it's where you start).
+   */
   closestIndex(p: LatLng): number {
     let best = 0;
     let bestD = Infinity;
     const { kx, ky } = frame(p.lat);
-    this.route.path.forEach((q, i) => {
+    const end = this.lastStretchFrom();
+    for (let i = 0; i < end; i++) {
+      const q = this.route.path[i];
       const d = Math.hypot((q.lng - p.lng) * kx, (q.lat - p.lat) * ky);
       if (d < bestD) {
         bestD = d;
         best = i;
       }
-    });
+    }
     return best;
+  }
+
+  /** Metres of the route ridden in order (not jumped over). */
+  private ridden = 0;
+
+  /**
+   * Where the run-in to the finish begins (a path index): the last fifth of
+   * the route (at least 1.5 km), only matched once half the ride is done
+   * (counting `extra` metres more). After that, the whole route.
+   */
+  private lastStretchFrom(extra = 0): number {
+    const total = this.total;
+    if (this.ridden + extra >= total / 2) return this.route.path.length;
+    return Math.max(1, this.indexAt(total - Math.max(1500, total * 0.2)));
   }
 
   /** True once any fix has matched the route. */
